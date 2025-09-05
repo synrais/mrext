@@ -11,12 +11,11 @@ import (
 
 	"github.com/wizzomafizzo/mrext/pkg/config"
 	"github.com/wizzomafizzo/mrext/pkg/games"
-	"github.com/wizzomafizzo/mrext/pkg/input/gamepad"
-	"github.com/wizzomafizzo/mrext/pkg/input/keyboard"
-	"github.com/wizzomafizzo/mrext/pkg/curses"
 	"github.com/wizzomafizzo/mrext/pkg/mister"
 	"github.com/wizzomafizzo/mrext/pkg/service"
 	"github.com/wizzomafizzo/mrext/pkg/sqlindex"
+	"github.com/wizzomafizzo/mrext/pkg/input"
+	"github.com/wizzomafizzo/mrext/pkg/curses"
 )
 
 var (
@@ -70,7 +69,7 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 	}
 
 	// === INDEXING ===
-	var flat [][2]string
+	flat := [][2]string{}
 	for sys, files := range gameLists {
 		for _, f := range files {
 			flat = append(flat, [2]string{sys, f})
@@ -94,7 +93,7 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 
 			game := files[idx]
 			name := strings.TrimSuffix(filepath.Base(game), filepath.Ext(game))
-			log.Info("Launching %s [%s]", name, sys)
+			log.Info("Launching %s <%s>", sys, game)
 
 			if err := mister.LaunchGenericFile(cfg, game); err != nil {
 				log.Error("Launch failed: %s", err)
@@ -107,8 +106,8 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 					break
 				}
 
-				// poll gamepad
-				events, _ := gamepad.ReadAll()
+				// poll gamepad + keyboard
+				events, _ := input.ReadAll()
 				for _, e := range events {
 					if e.Pressed {
 						switch e.Button {
@@ -119,14 +118,14 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 							log.Info("Exit requested (SELECT)")
 							return
 						case "DPAD_RIGHT":
-							log.Info("Next game (RIGHT)")
+							log.Info("Next game requested (RIGHT)")
 							idx++
 							if idx >= len(files) {
 								idx = 0
 							}
 							goto nextGame
 						case "DPAD_LEFT":
-							log.Info("Previous game (LEFT)")
+							log.Info("Previous game requested (LEFT)")
 							idx--
 							if idx < 0 {
 								idx = len(files) - 1
@@ -138,17 +137,16 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 					}
 				}
 
-				// poll keyboard
-				if key := keyboard.ReadKey(); key != "" {
+				if key := input.ReadKey(); key != "" {
 					switch key {
 					case "q":
 						log.Info("Exit requested (q)")
 						return
 					case "n":
-						log.Info("Next game (n)")
+						log.Info("Next game requested (n)")
 						goto nextGame
 					case "p":
-						log.Info("Previous game (p)")
+						log.Info("Previous game requested (p)")
 						idx--
 						if idx < 0 {
 							idx = len(files) - 1
@@ -183,12 +181,15 @@ func runSearchUI(cfg *config.UserConfig) {
 		log.Info("No results for %q", query)
 		return
 	}
+
 	var labels []string
 	for _, r := range results {
 		labels = append(labels, fmt.Sprintf("[%s] %s", r.System, r.Name))
 	}
-	choice, _, err := curses.ListPicker(nil, curses.ListPickerOpts{Title: "Search Results"}, labels)
-	if err != nil || choice < 0 || choice >= len(results) {
+
+	// curses.ListPicker returns (choice, key, err)
+	choice, _, _ := curses.ListPicker(nil, curses.ListPickerOpts{Title: "Search Results"}, labels)
+	if choice < 0 || choice >= len(results) {
 		return
 	}
 	selected := results[choice]
