@@ -1,299 +1,118 @@
-package txtindex
+package run
 
 import (
-	"archive/tar"
-	"bufio"
+	"flag"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
-	"regexp"
-	"strings"
-
 	"github.com/wizzomafizzo/mrext/pkg/config"
-	"github.com/wizzomafizzo/mrext/pkg/utils"
+	"github.com/wizzomafizzo/mrext/pkg/games"
+	"github.com/wizzomafizzo/mrext/pkg/mister"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 )
 
-func Exists() bool {
-	_, err := os.Stat(config.SearchDbFile)
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
 	return err == nil
 }
 
-func Generate(files [][2]string, indexPath string) error {
-	tmpDir, err := os.MkdirTemp(os.TempDir(), "search-")
-	if err != nil {
-		return err
+func bindMount(src, dst string) error {
+	os.MkdirAll(dst, 0755)
+	cmd := exec.Command("mount", "-o", "bind", src, dst)
+	return cmd.Run()
+}
+
+func unmount(path string) {
+	exec.Command("umount", path).Run()
+}
+
+func findAmigaShared() string {
+	amigaPaths := games.GetSystemPaths(&config.UserConfig{}, []games.System{games.Systems["Amiga"]})
+	for _, p := range amigaPaths {
+		candidate := filepath.Join(p.Path, "shared")
+		if pathExists(candidate) {
+			return candidate
+		}
+	}
+	// fallback: try usb0-3
+	for i := 0; i < 4; i++ {
+		usbCandidate := fmt.Sprintf("/media/usb%d/games/Amiga/shared", i)
+		if pathExists(usbCandidate) {
+			return usbCandidate
+		}
+	}
+	// fallback: fat
+	if pathExists("/media/fat/games/Amiga/shared") {
+		return "/media/fat/games/Amiga/shared"
+	}
+	return ""
+}
+
+// 🔑 Entry point for the run tool when called from SAM
+func Run(args []string) {
+	fs := flag.NewFlagSet("run", flag.ExitOnError)
+	runPath := fs.String("path", "", "launch a single game by path or AmigaVision name")
+	_ = fs.Parse(args)
+
+	if *runPath == "" {
+		fmt.Fprintln(os.Stderr, "No game path provided")
+		os.Exit(1)
 	}
 
-	tmpFilesDir := filepath.Join(tmpDir, "files")
-	if err := os.Mkdir(tmpFilesDir, 0755); err != nil {
-		return err
-	}
-
-	indexFiles := make(map[string]*os.File)
-	getIndexFile := func(fn string) (*os.File, error) {
-		if _, ok := indexFiles[fn]; !ok {
-			indexFiles[fn], err = os.Create(filepath.Join(tmpFilesDir, fn))
-			if err != nil {
-				return nil, err
-			}
+	// Case 1: AmigaVision name (anything without slash/backslash)
+	if !strings.ContainsAny(*runPath, "/\\") {
+		amigaShared := findAmigaShared()
+		if amigaShared == "" {
+			fmt.Fprintln(os.Stderr, "games/Amiga/shared folder not found")
+			os.Exit(1)
 		}
 
-		return indexFiles[fn], nil
-	}
+		// Create tmp copy of shared
+		tmpShared := "/tmp/.SAM_tmp/Amiga_shared"
+		os.RemoveAll(tmpShared)
+		os.MkdirAll(tmpShared, 0755)
 
-	for i := range files {
-		pathsFile, err := getIndexFile(files[i][0] + "__paths")
+		// Copy real shared into tmp
+		exec.Command("cp", "-a", amigaShared+"/.", tmpShared).Run()
+
+		// Write ags_boot
+		bootFile := filepath.Join(tmpShared, "ags_boot")
+		content := *runPath + "\n\n"
+		os.WriteFile(bootFile, []byte(content), 0644)
+
+		// Always unmount first
+		unmount(amigaShared)
+
+		// Bind tmp shared over real shared
+		if err := bindMount(tmpShared, amigaShared); err != nil {
+			fmt.Fprintf(os.Stderr, "Bind mount failed: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Launch minimig
+		err := mister.LaunchCore(&config.UserConfig{}, games.Systems["Amiga"])
 		if err != nil {
-			return err
+			fmt.Fprintf(os.Stderr, "Launch failed: %v\n", err)
+			os.Exit(1)
 		}
+		os.Exit(0)
+	}
 
-		namesFile, err := getIndexFile(files[i][0] + "__names")
-		if err != nil {
-			return err
+	// Case 2: MGL file
+	if strings.HasSuffix(strings.ToLower(*runPath), ".mgl") {
+		if err := mister.LaunchGenericFile(&config.UserConfig{}, *runPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Launch failed: %v\n", err)
+			os.Exit(1)
 		}
-
-		basename := filepath.Base(files[i][1])
-		name := strings.TrimSuffix(basename, filepath.Ext(basename))
-
-		_, err = pathsFile.WriteString(files[i][1] + "\n")
-		if err != nil {
-			return err
-		}
-
-		_, err = namesFile.WriteString(name + "\n")
-		if err != nil {
-			return err
-		}
+		os.Exit(0)
 	}
 
-	for _, f := range indexFiles {
-		_ = f.Sync()
-		_ = f.Close()
+	// Case 3: generic file path
+	system, _ := games.BestSystemMatch(&config.UserConfig{}, *runPath)
+	if err := mister.LaunchGame(&config.UserConfig{}, system, *runPath); err != nil {
+		fmt.Fprintf(os.Stderr, "Launch failed: %v\n", err)
+		os.Exit(1)
 	}
-
-	tmpIndexPath := filepath.Join(tmpDir, filepath.Base(config.SearchDbFile))
-
-	indexTar, err := os.Create(tmpIndexPath)
-	if err != nil {
-		return err
-	}
-
-	tarw := tar.NewWriter(indexTar)
-	defer func(tarw *tar.Writer) {
-		_ = tarw.Close()
-	}(tarw)
-
-	tmpFiles, err := os.ReadDir(tmpFilesDir)
-	if err != nil {
-		return err
-	}
-
-	for _, indexFile := range tmpFiles {
-		file, err := os.Open(filepath.Join(tmpFilesDir, indexFile.Name()))
-		if err != nil {
-			return err
-		}
-
-		fileInfo, err := indexFile.Info()
-		if err != nil {
-			_ = file.Close()
-			return err
-		}
-
-		header := &tar.Header{
-			Name:    indexFile.Name(),
-			Size:    fileInfo.Size(),
-			Mode:    int64(fileInfo.Mode()),
-			ModTime: fileInfo.ModTime(),
-		}
-
-		err = tarw.WriteHeader(header)
-		if err != nil {
-			_ = file.Close()
-			return err
-		}
-
-		if _, err := io.Copy(tarw, file); err != nil {
-			_ = file.Close()
-			return err
-		}
-	}
-
-	err = utils.MoveFile(tmpIndexPath, indexPath)
-	if err != nil {
-		return err
-	}
-
-	err = os.RemoveAll(tmpDir)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-type indexMap map[string]map[string][]string
-
-type Index struct {
-	Path  string
-	files indexMap
-}
-
-func Open(indexPath string) (Index, error) {
-	var index Index
-
-	_, err := os.Stat(indexPath)
-	if err != nil {
-		return index, err
-	}
-
-	indexTar, err := os.Open(indexPath)
-	if err != nil {
-		return index, err
-	}
-	defer func(indexTar *os.File) {
-		_ = indexTar.Close()
-	}(indexTar)
-
-	index.Path = indexPath
-	index.files = make(map[string]map[string][]string)
-
-	r := tar.NewReader(indexTar)
-	for {
-		header, err := r.Next()
-
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			return index, err
-		}
-
-		if header.Typeflag == tar.TypeReg {
-			bs := bufio.NewScanner(r)
-			lines := make([]string, 0)
-
-			for bs.Scan() {
-				lines = append(lines, bs.Text())
-			}
-
-			if err := bs.Err(); err != nil {
-				return index, err
-			}
-
-			hp := strings.Split(header.Name, "__")
-
-			if len(hp) != 2 {
-				return index, fmt.Errorf("invalid index file: %s", header.Name)
-			}
-
-			if _, ok := index.files[hp[0]]; !ok {
-				index.files[hp[0]] = make(map[string][]string)
-			}
-
-			index.files[hp[0]][hp[1]] = lines
-		}
-	}
-
-	return index, nil
-}
-
-type SearchResult struct {
-	System string
-	Name   string
-	Path   string
-}
-
-func (idx *Index) searchSystemByNameGeneric(test func(string, string) bool, system string, query string) []SearchResult {
-	var results []SearchResult
-	for i, name := range idx.files[system]["names"] {
-		if test(name, query) {
-			results = append(results, SearchResult{
-				System: system,
-				Name:   name,
-				Path:   idx.files[system]["paths"][i],
-			})
-		}
-	}
-	return results
-}
-
-func searchByNameTest(name string, query string) bool {
-	return strings.Contains(strings.ToLower(name), query)
-}
-
-func (idx *Index) SearchAllByName(query string) []SearchResult {
-	var results []SearchResult
-	query = strings.ToLower(query)
-	for _, system := range utils.SortedMapKeys(idx.files) {
-		results = append(results, idx.searchSystemByNameGeneric(searchByNameTest, system, query)...)
-	}
-	return results
-}
-
-func (idx *Index) SearchSystemByName(system string, query string) []SearchResult {
-	query = strings.ToLower(query)
-	return idx.searchSystemByNameGeneric(searchByNameTest, system, query)
-}
-
-func searchByNameReTest(name string, query string) bool {
-	re, err := regexp.Compile(query)
-	if err != nil {
-		return false
-	}
-	return re.MatchString(name)
-}
-
-func (idx *Index) SearchSystemByNameRe(system string, query string) []SearchResult {
-	return idx.searchSystemByNameGeneric(searchByNameReTest, system, query)
-}
-
-func (idx *Index) SearchSystemByWords(system string, query string) []SearchResult {
-	var results []SearchResult
-	words := strings.Split(strings.ToLower(query), " ")
-	if len(words) == 0 {
-		return results
-	}
-
-	for i, name := range idx.files[system]["names"] {
-		if searchByNameTest(name, words[0]) {
-			results = append(results, SearchResult{
-				System: system,
-				Name:   name,
-				Path:   idx.files[system]["paths"][i],
-			})
-		}
-	}
-
-	for _, word := range words[1:] {
-		var newResults []SearchResult
-		for _, result := range results {
-			if searchByNameTest(result.Name, word) {
-				newResults = append(newResults, result)
-			}
-		}
-		results = newResults
-	}
-
-	return results
-}
-
-func (idx *Index) SearchAllByWords(query string) []SearchResult {
-	var results []SearchResult
-	for _, system := range utils.SortedMapKeys(idx.files) {
-		results = append(results, idx.SearchSystemByWords(system, query)...)
-	}
-	return results
-}
-
-func (idx *Index) Total() int {
-	total := 0
-	for system := range idx.files {
-		total += len(idx.files[system]["paths"])
-	}
-	return total
-}
-
-func (idx *Index) Systems() []string {
-	return utils.SortedMapKeys(idx.files)
+	os.Exit(0)
 }
