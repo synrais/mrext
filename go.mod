@@ -1,4 +1,4 @@
-module github.com/wizzomafizzo/mrext
+module github.com/synrais/mrext
 
 go 1.18
 
