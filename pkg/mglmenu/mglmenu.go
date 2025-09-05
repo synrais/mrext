@@ -2,7 +2,6 @@ package main
 
 import (
     "bufio"
-    "flag"
     "fmt"
     "os"
     "os/exec"
@@ -10,6 +9,7 @@ import (
     "strings"
 
     "github.com/rivo/tview"
+    "github.com/gdamore/tcell/v2"
 )
 
 type Game struct {
@@ -37,16 +37,30 @@ func loadSystems() map[string][]Game {
     return systems
 }
 
-func runInteractive(systems map[string][]Game) {
+func main() {
+    systems := loadSystems()
+
+    // Force tcell to use stdin/stdout instead of /dev/tty
+    screen, err := tcell.NewTerminfoScreen()
+    if err != nil {
+        fmt.Println("failed to create screen:", err)
+        os.Exit(1)
+    }
+    if err = screen.Init(); err != nil {
+        fmt.Println("screen init failed:", err)
+        os.Exit(1)
+    }
+    defer screen.Fini()
+
     app := tview.NewApplication()
+    app.SetScreen(screen)
+
     sysList := tview.NewList()
     gameList := tview.NewList()
 
-    // populate system list
     for sys := range systems {
         sysName := sys
         sysList.AddItem(sysName, "", 0, func() {
-            // switch to game list
             gameList.Clear()
             for _, g := range systems[sysName] {
                 game := g
@@ -61,45 +75,15 @@ func runInteractive(systems map[string][]Game) {
         })
     }
 
-    // back key to return from games to system list
     gameList.SetDoneFunc(func() {
         app.SetRoot(sysList, true).SetFocus(sysList)
     })
-
-    // also allow exiting from system list with Esc
     sysList.SetDoneFunc(func() {
         app.Stop()
     })
 
-    // log to file
-    logFile, _ := os.OpenFile("/tmp/mglmenu.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-    defer logFile.Close()
-    fmt.Fprintln(logFile, "mglmenu started")
-
     if err := app.SetRoot(sysList, true).Run(); err != nil {
-        fmt.Fprintln(logFile, "error:", err)
-        panic(err)
-    }
-}
-
-func runDebug(systems map[string][]Game) {
-    for sys, games := range systems {
-        fmt.Println("System:", sys)
-        for _, g := range games {
-            fmt.Println("   ", g.Title, "=>", g.Path)
-        }
-    }
-}
-
-func main() {
-    debug := flag.Bool("debug", false, "run in debug (non-TUI) mode")
-    flag.Parse()
-
-    systems := loadSystems()
-
-    if *debug {
-        runDebug(systems)
-    } else {
-        runInteractive(systems)
+        fmt.Println("error:", err)
+        os.Exit(1)
     }
 }
