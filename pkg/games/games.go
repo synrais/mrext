@@ -206,7 +206,9 @@ func GetFiles(systemId string, path string) ([]string, error) {
 			}
 		} else {
 			// regular files
-			if MatchSystemFile(*system, path) {
+			lowerPath := strings.ToLower(path)
+			// always accept .mgl files universally
+			if strings.HasSuffix(lowerPath, ".mgl") || MatchSystemFile(*system, path) {
 				*results = append(*results, path)
 			}
 		}
