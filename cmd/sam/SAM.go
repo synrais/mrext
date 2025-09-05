@@ -10,28 +10,26 @@ import (
 	"time"
 
 	"github.com/wizzomafizzo/mrext/pkg/config"
+	"github.com/wizzomafizzo/mrext/pkg/curses"
 	"github.com/wizzomafizzo/mrext/pkg/framebuffer"
 	"github.com/wizzomafizzo/mrext/pkg/games"
-	"github.com/wizzomafizzo/mrext/pkg/input/gamepad"
-	"github.com/wizzomafizzo/mrext/pkg/input/keyboard"
-	"github.com/wizzomafizzo/mrext/pkg/curses/listpicker"
-	"github.com/wizzomafizzo/mrext/pkg/curses/onscreenkeyboard"
+	"github.com/wizzomafizzo/mrext/pkg/input"
 	"github.com/wizzomafizzo/mrext/pkg/mister"
 	"github.com/wizzomafizzo/mrext/pkg/service"
 	"github.com/wizzomafizzo/mrext/pkg/sqlindex"
 )
 
 var (
-	log = service.NewLogger("sam")
+	log *service.Logger
 )
 
 func main() {
 	delayFlag := flag.Int("delay", 30, "seconds between games")
 	randomFlag := flag.Bool("random", false, "random order")
 	cycleAllFlag := flag.Bool("cycle-all", false, "cycle through all systems")
-	overlayFlag := flag.Bool("overlay", true, "show on-screen overlay")
-	excludeFlag := flag.String("exclude", "", "comma-separated list of system IDs to skip")
 	flag.Parse()
+
+	log = service.NewLogger("sam")
 
 	cfg, err := config.LoadUserConfig("mrext", &config.UserConfig{})
 	if err != nil {
@@ -39,28 +37,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	exclude := map[string]bool{}
-	if *excludeFlag != "" {
-		for _, id := range strings.Split(*excludeFlag, ",") {
-			exclude[strings.TrimSpace(id)] = true
-		}
-	}
-
-	svc := &service.Service{
-		Name: "sam",
-		Main: func() {
-			runSAM(cfg, *delayFlag, *randomFlag, *cycleAllFlag, *overlayFlag, exclude)
-		},
-	}
+	svc := service.New("sam", func() {
+		runSAM(cfg, *delayFlag, *randomFlag, *cycleAllFlag)
+	})
 	svc.Run()
 }
 
-func runSAM(cfg *config.UserConfig, delay int, random, cycleAll, showOverlay bool, exclude map[string]bool) {
+func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 	rand.Seed(time.Now().UnixNano())
-	log.Info("Attract Mode starting: delay=%ds random=%v cycle_all=%v overlay=%v", delay, random, cycleAll, showOverlay)
+	log.Info("Attract Mode starting: delay=%ds random=%v cycle_all=%v", delay, random, cycleAll)
 
 	// === GAME SCAN ===
 	systems := games.AllSystems()
+	exclude := make(map[string]bool)
+	for _, id := range cfg.Exclude {
+		exclude[strings.TrimSpace(id)] = true
+	}
+
 	gameLists := make(map[string][]string)
 	for _, sys := range systems {
 		if exclude[sys.Id] {
@@ -85,19 +78,13 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll, showOverlay boo
 
 	// === OVERLAY ===
 	var fb framebuffer.Framebuffer
-	if showOverlay {
+	if cfg.ShowOverlay {
 		fb.Open()
 		defer fb.Close()
 	}
 
 	// === INDEXING ===
-	flat := [][2]string{}
-	for sys, files := range gameLists {
-		for _, f := range files {
-			flat = append(flat, [2]string{sys, f})
-		}
-	}
-	sqlindex.Generate(flat, func(_ int) {})
+	sqlindex.Generate(gameLists)
 
 	// === MAIN LOOP ===
 	for sys, files := range gameLists {
@@ -117,8 +104,8 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll, showOverlay boo
 			name := strings.TrimSuffix(filepath.Base(game), filepath.Ext(game))
 			overlayText := fmt.Sprintf("Now Playing: %s [%s]", name, sys)
 
-			if showOverlay {
-				fb.Fill(framebuffer.RGB{0, 0, 0})
+			if cfg.ShowOverlay {
+				fb.Fill(framebuffer.Color{0, 0, 0})
 				fb.DrawString(20, 20, overlayText)
 			}
 
@@ -135,7 +122,7 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll, showOverlay boo
 				}
 
 				// poll gamepad
-				events, _ := gamepad.ReadAll()
+				events, _ := input.ReadAllGamepads()
 				for _, e := range events {
 					if e.Button == "START" && e.Pressed {
 						log.Info("Skip requested (START)")
@@ -147,7 +134,10 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll, showOverlay boo
 					}
 					if e.Button == "DPAD_RIGHT" && e.Pressed {
 						log.Info("Next game requested (RIGHT)")
-						idx = (idx + 1) % len(files)
+						idx++
+						if idx >= len(files) {
+							idx = 0
+						}
 						goto nextGame
 					}
 					if e.Button == "DPAD_LEFT" && e.Pressed {
@@ -164,7 +154,7 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll, showOverlay boo
 				}
 
 				// poll keyboard
-				if key := keyboard.ReadKey(); key != "" {
+				if key := input.ReadKey(); key != "" {
 					if key == "q" {
 						log.Info("Exit requested (q)")
 						return
@@ -201,7 +191,7 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll, showOverlay boo
 }
 
 func runSearchUI(cfg *config.UserConfig) {
-	query := onscreenkeyboard.Run("Search games:")
+	query := curses.RunOnscreenKeyboard("Search games:")
 	if query == "" {
 		return
 	}
@@ -214,7 +204,7 @@ func runSearchUI(cfg *config.UserConfig) {
 	for _, r := range results {
 		labels = append(labels, fmt.Sprintf("[%s] %s", r.System, r.Name))
 	}
-	choice := listpicker.Run("Search Results", labels)
+	choice := curses.RunListPicker("Search Results", labels)
 	if choice < 0 || choice >= len(results) {
 		return
 	}
