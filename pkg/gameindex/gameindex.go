@@ -1,299 +1,367 @@
-package txtindex
+package gameindex
 
 import (
-	"archive/tar"
-	"bufio"
+	"flag"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
-	"regexp"
-	"strings"
-
 	"github.com/wizzomafizzo/mrext/pkg/config"
+	"github.com/wizzomafizzo/mrext/pkg/games"
+	"github.com/wizzomafizzo/mrext/pkg/mister"
 	"github.com/wizzomafizzo/mrext/pkg/utils"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
 )
 
-func Exists() bool {
-	_, err := os.Stat(config.SearchDbFile)
+// SAM uses slightly different system IDs.
+var idMap = map[string]string{
+	"Gameboy":        "gb",
+	"GameboyColor":   "gbc",
+	"GameGear":       "gg",
+	"Nintendo64":     "n64",
+	"MasterSystem":   "sms",
+	"Sega32X":        "s32x",
+	"SuperGameboy":   "sgb",
+	"TurboGrafx16":   "tgfx16",
+	"TurboGrafx16CD": "tgfx16cd",
+}
+
+func samId(id string) string {
+	if id, ok := idMap[id]; ok {
+		return id
+	}
+	return id
+}
+
+func reverseId(id string) string {
+	for k, v := range idMap {
+		if strings.EqualFold(v, id) {
+			return k
+		}
+	}
+	return id
+}
+
+func gamelistFilename(systemId string) string {
+	var prefix string
+	if id, ok := idMap[systemId]; ok {
+		prefix = id
+	} else {
+		prefix = systemId
+	}
+	return strings.ToLower(prefix) + "_gamelist.txt"
+}
+
+func writeGamelist(gamelistDir string, systemId string, files []string) {
+	gamelistPath := filepath.Join(gamelistDir, gamelistFilename(systemId))
+	tmpPath, err := os.CreateTemp("", "gamelist-*.txt")
+	if err != nil {
+		panic(err)
+	}
+
+	for _, file := range files {
+		_, _ = tmpPath.WriteString(file + "\n")
+	}
+	_ = tmpPath.Sync()
+	_ = tmpPath.Close()
+
+	err = utils.MoveFile(tmpPath.Name(), gamelistPath)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func filterUniqueWithMGL(files []string) []string {
+	chosen := make(map[string]string)
+	for _, f := range files {
+		base := strings.TrimSuffix(strings.ToLower(filepath.Base(f)), filepath.Ext(f))
+		ext := strings.ToLower(filepath.Ext(f))
+		if prev, ok := chosen[base]; ok {
+			if strings.HasSuffix(prev, ".mgl") {
+				continue
+			}
+			if ext == ".mgl" {
+				chosen[base] = f
+			}
+		} else {
+			chosen[base] = f
+		}
+	}
+	result := []string{}
+	for _, v := range chosen {
+		result = append(result, v)
+	}
+	return result
+}
+
+// ---- Helpers ----
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
 	return err == nil
 }
 
-func Generate(files [][2]string, indexPath string) error {
-	tmpDir, err := os.MkdirTemp(os.TempDir(), "search-")
-	if err != nil {
-		return err
+func bindMount(src, dst string) error {
+	os.MkdirAll(dst, 0755)
+	cmd := exec.Command("mount", "-o", "bind", src, dst)
+	return cmd.Run()
+}
+
+func unmount(path string) {
+	exec.Command("umount", path).Run()
+}
+
+// ---- AmigaVision helpers ----
+func parseLines(data string) []string {
+	var out []string
+	lines := strings.Split(strings.ReplaceAll(data, "\r\n", "\n"), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func writeCustomList(dir, filename string, entries []string) {
+	path := filepath.Join(dir, filename)
+	tmp, _ := os.CreateTemp("", "amiga-*.txt")
+	for _, e := range entries {
+		_, _ = tmp.WriteString(e + "\n")
+	}
+	tmp.Close()
+	_ = utils.MoveFile(tmp.Name(), path)
+}
+
+func writeAmigaVisionLists(gamelistDir string, paths []string) {
+	var gamesList, demosList []string
+
+	for _, path := range paths {
+		filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			switch strings.ToLower(d.Name()) {
+			case "games.txt":
+				data, _ := os.ReadFile(p)
+				gamesList = append(gamesList, parseLines(string(data))...)
+			case "demos.txt":
+				data, _ := os.ReadFile(p)
+				demosList = append(demosList, parseLines(string(data))...)
+			}
+			return nil
+		})
 	}
 
-	tmpFilesDir := filepath.Join(tmpDir, "files")
-	if err := os.Mkdir(tmpFilesDir, 0755); err != nil {
-		return err
+	if len(gamesList) > 0 {
+		writeCustomList(gamelistDir, "amigavisiongames_gamelist.txt", gamesList)
+	}
+	if len(demosList) > 0 {
+		writeCustomList(gamelistDir, "amigavisiondemos_gamelist.txt", demosList)
+	}
+}
+
+func createGamelists(gamelistDir string, systemPaths map[string][]string, progress bool, quiet bool, filter bool) int {
+	start := time.Now()
+
+	if !quiet && !progress {
+		fmt.Println("Finding system folders...")
 	}
 
-	indexFiles := make(map[string]*os.File)
-	getIndexFile := func(fn string) (*os.File, error) {
-		if _, ok := indexFiles[fn]; !ok {
-			indexFiles[fn], err = os.Create(filepath.Join(tmpFilesDir, fn))
+	totalPaths := 0
+	for _, v := range systemPaths {
+		totalPaths += len(v)
+	}
+	totalSteps := totalPaths
+	currentStep := 0
+
+	totalGames := 0
+	for systemId, paths := range systemPaths {
+		var systemFiles []string
+
+		for _, path := range paths {
+			if !quiet {
+				if progress {
+					fmt.Println("XXX")
+					fmt.Println(int(float64(currentStep) / float64(totalSteps) * 100))
+					fmt.Printf("Scanning %s (%s)\n", systemId, path)
+					fmt.Println("XXX")
+				} else {
+					fmt.Printf("Scanning %s: %s\n", systemId, path)
+				}
+			}
+
+			files, err := games.GetFiles(systemId, path)
 			if err != nil {
-				return nil, err
+				fmt.Fprintln(os.Stderr, err)
+				continue
 			}
+			systemFiles = append(systemFiles, files...)
+
+			currentStep++
 		}
 
-		return indexFiles[fn], nil
-	}
-
-	for i := range files {
-		pathsFile, err := getIndexFile(files[i][0] + "__paths")
-		if err != nil {
-			return err
+		if filter {
+			systemFiles = filterUniqueWithMGL(systemFiles)
 		}
 
-		namesFile, err := getIndexFile(files[i][0] + "__names")
-		if err != nil {
-			return err
+		if len(systemFiles) > 0 {
+			totalGames += len(systemFiles)
+			writeGamelist(gamelistDir, systemId, systemFiles)
 		}
 
-		basename := filepath.Base(files[i][1])
-		name := strings.TrimSuffix(basename, filepath.Ext(basename))
-
-		_, err = pathsFile.WriteString(files[i][1] + "\n")
-		if err != nil {
-			return err
-		}
-
-		_, err = namesFile.WriteString(name + "\n")
-		if err != nil {
-			return err
+		if strings.EqualFold(systemId, "Amiga") {
+			writeAmigaVisionLists(gamelistDir, paths)
 		}
 	}
 
-	for _, f := range indexFiles {
-		_ = f.Sync()
-		_ = f.Close()
-	}
-
-	tmpIndexPath := filepath.Join(tmpDir, filepath.Base(config.SearchDbFile))
-
-	indexTar, err := os.Create(tmpIndexPath)
-	if err != nil {
-		return err
-	}
-
-	tarw := tar.NewWriter(indexTar)
-	defer func(tarw *tar.Writer) {
-		_ = tarw.Close()
-	}(tarw)
-
-	tmpFiles, err := os.ReadDir(tmpFilesDir)
-	if err != nil {
-		return err
-	}
-
-	for _, indexFile := range tmpFiles {
-		file, err := os.Open(filepath.Join(tmpFilesDir, indexFile.Name()))
-		if err != nil {
-			return err
-		}
-
-		fileInfo, err := indexFile.Info()
-		if err != nil {
-			_ = file.Close()
-			return err
-		}
-
-		header := &tar.Header{
-			Name:    indexFile.Name(),
-			Size:    fileInfo.Size(),
-			Mode:    int64(fileInfo.Mode()),
-			ModTime: fileInfo.ModTime(),
-		}
-
-		err = tarw.WriteHeader(header)
-		if err != nil {
-			_ = file.Close()
-			return err
-		}
-
-		if _, err := io.Copy(tarw, file); err != nil {
-			_ = file.Close()
-			return err
+	if !quiet {
+		taken := int(time.Since(start).Seconds())
+		if progress {
+			fmt.Println("XXX")
+			fmt.Println("100")
+			fmt.Printf("Indexing complete (%d games in %ds)\n", totalGames, taken)
+			fmt.Println("XXX")
+		} else {
+			fmt.Printf("Indexing complete (%d games in %ds)\n", totalGames, taken)
 		}
 	}
 
-	err = utils.MoveFile(tmpIndexPath, indexPath)
-	if err != nil {
-		return err
-	}
-
-	err = os.RemoveAll(tmpDir)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return totalGames
 }
 
-type indexMap map[string]map[string][]string
-
-type Index struct {
-	Path  string
-	files indexMap
+func findAmigaShared() string {
+	amigaPaths := games.GetSystemPaths(&config.UserConfig{}, []games.System{games.Systems["Amiga"]})
+	for _, p := range amigaPaths {
+		candidate := filepath.Join(p.Path, "shared")
+		if pathExists(candidate) {
+			return candidate
+		}
+	}
+	// fallback: try usb0-3
+	for i := 0; i < 4; i++ {
+		usbCandidate := fmt.Sprintf("/media/usb%d/games/Amiga/shared", i)
+		if pathExists(usbCandidate) {
+			return usbCandidate
+		}
+	}
+	// fallback: fat
+	if pathExists("/media/fat/games/Amiga/shared") {
+		return "/media/fat/games/Amiga/shared"
+	}
+	return ""
 }
 
-func Open(indexPath string) (Index, error) {
-	var index Index
+func main() {
+	gamelistDir := flag.String("o", ".", "gamelist files directory")
+	filter := flag.String("s", "all", "list of systems to index (comma separated)")
+	progress := flag.Bool("p", false, "print output for dialog gauge")
+	quiet := flag.Bool("q", false, "suppress all status output")
+	detect := flag.Bool("d", false, "list active system folders")
+	noDupes := flag.Bool("nodupes", false, "filter out duplicate games")
+	runPath := flag.String("run", "", "launch a single game by path or AmigaVision name")
+	flag.Parse()
 
-	_, err := os.Stat(indexPath)
-	if err != nil {
-		return index, err
-	}
-
-	indexTar, err := os.Open(indexPath)
-	if err != nil {
-		return index, err
-	}
-	defer func(indexTar *os.File) {
-		_ = indexTar.Close()
-	}(indexTar)
-
-	index.Path = indexPath
-	index.files = make(map[string]map[string][]string)
-
-	r := tar.NewReader(indexTar)
-	for {
-		header, err := r.Next()
-
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			return index, err
-		}
-
-		if header.Typeflag == tar.TypeReg {
-			bs := bufio.NewScanner(r)
-			lines := make([]string, 0)
-
-			for bs.Scan() {
-				lines = append(lines, bs.Text())
+	if *runPath != "" {
+		// Case 1: AmigaVision name (anything without slash/backslash)
+		if !strings.ContainsAny(*runPath, "/\\") {
+			amigaShared := findAmigaShared()
+			if amigaShared == "" {
+				fmt.Fprintln(os.Stderr, "games/Amiga/shared folder not found")
+				os.Exit(1)
 			}
 
-			if err := bs.Err(); err != nil {
-				return index, err
+			// Create tmp copy of shared
+			tmpShared := "/tmp/.SAM_tmp/Amiga_shared"
+			os.RemoveAll(tmpShared)
+			os.MkdirAll(tmpShared, 0755)
+
+			// Copy real shared into tmp
+			exec.Command("cp", "-a", amigaShared+"/.", tmpShared).Run()
+
+			// Write ags_boot with 2 lines (game + blank line, LF endings)
+			bootFile := filepath.Join(tmpShared, "ags_boot")
+			content := *runPath + "\n\n"
+			os.WriteFile(bootFile, []byte(content), 0644)
+
+			// Always unmount first (cleanup from previous run)
+			unmount(amigaShared)
+
+			// Bind tmp shared over real shared
+			if err := bindMount(tmpShared, amigaShared); err != nil {
+				fmt.Fprintf(os.Stderr, "Bind mount failed: %v\n", err)
+				os.Exit(1)
 			}
 
-			hp := strings.Split(header.Name, "__")
+			// Launch minimig (non-blocking)
+			err := mister.LaunchCore(&config.UserConfig{}, games.Systems["Amiga"])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Launch failed: %v\n", err)
+				os.Exit(1)
+			}
+			// Leave bind active (SAMon style)
+			os.Exit(0)
+		}
 
-			if len(hp) != 2 {
-				return index, fmt.Errorf("invalid index file: %s", header.Name)
+		// Case 2: MGL file
+		if strings.HasSuffix(strings.ToLower(*runPath), ".mgl") {
+			if err := mister.LaunchGenericFile(&config.UserConfig{}, *runPath); err != nil {
+				fmt.Fprintf(os.Stderr, "Launch failed: %v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			// Case 3: generic file path
+			system, _ := games.BestSystemMatch(&config.UserConfig{}, *runPath)
+			if err := mister.LaunchGame(&config.UserConfig{}, system, *runPath); err != nil {
+				fmt.Fprintf(os.Stderr, "Launch failed: %v\n", err)
+				os.Exit(1)
+			}
+		}
+		os.Exit(0)
+	}
+
+	var systems []games.System
+	if *filter == "all" {
+		systems = games.AllSystems()
+	} else {
+		for _, filterId := range strings.Split(*filter, ",") {
+			systemId := reverseId(filterId)
+
+			if system, ok := games.Systems[systemId]; ok {
+				systems = append(systems, system)
+				continue
 			}
 
-			if _, ok := index.files[hp[0]]; !ok {
-				index.files[hp[0]] = make(map[string][]string)
+			system, err := games.LookupSystem(systemId)
+			if err != nil {
+				continue
 			}
 
-			index.files[hp[0]][hp[1]] = lines
+			systems = append(systems, *system)
 		}
 	}
 
-	return index, nil
-}
-
-type SearchResult struct {
-	System string
-	Name   string
-	Path   string
-}
-
-func (idx *Index) searchSystemByNameGeneric(test func(string, string) bool, system string, query string) []SearchResult {
-	var results []SearchResult
-	for i, name := range idx.files[system]["names"] {
-		if test(name, query) {
-			results = append(results, SearchResult{
-				System: system,
-				Name:   name,
-				Path:   idx.files[system]["paths"][i],
-			})
+	if *detect {
+		results := games.GetActiveSystemPaths(&config.UserConfig{}, systems)
+		for _, r := range results {
+			fmt.Printf("%s:%s\n", strings.ToLower(samId(r.System.Id)), r.Path)
 		}
-	}
-	return results
-}
-
-func searchByNameTest(name string, query string) bool {
-	return strings.Contains(strings.ToLower(name), query)
-}
-
-func (idx *Index) SearchAllByName(query string) []SearchResult {
-	var results []SearchResult
-	query = strings.ToLower(query)
-	for _, system := range utils.SortedMapKeys(idx.files) {
-		results = append(results, idx.searchSystemByNameGeneric(searchByNameTest, system, query)...)
-	}
-	return results
-}
-
-func (idx *Index) SearchSystemByName(system string, query string) []SearchResult {
-	query = strings.ToLower(query)
-	return idx.searchSystemByNameGeneric(searchByNameTest, system, query)
-}
-
-func searchByNameReTest(name string, query string) bool {
-	re, err := regexp.Compile(query)
-	if err != nil {
-		return false
-	}
-	return re.MatchString(name)
-}
-
-func (idx *Index) SearchSystemByNameRe(system string, query string) []SearchResult {
-	return idx.searchSystemByNameGeneric(searchByNameReTest, system, query)
-}
-
-func (idx *Index) SearchSystemByWords(system string, query string) []SearchResult {
-	var results []SearchResult
-	words := strings.Split(strings.ToLower(query), " ")
-	if len(words) == 0 {
-		return results
+		os.Exit(0)
 	}
 
-	for i, name := range idx.files[system]["names"] {
-		if searchByNameTest(name, words[0]) {
-			results = append(results, SearchResult{
-				System: system,
-				Name:   name,
-				Path:   idx.files[system]["paths"][i],
-			})
-		}
+	systemPaths := games.GetSystemPaths(&config.UserConfig{}, systems)
+	systemPathsMap := make(map[string][]string)
+
+	for _, p := range systemPaths {
+		systemPathsMap[p.System.Id] = append(systemPathsMap[p.System.Id], p.Path)
 	}
 
-	for _, word := range words[1:] {
-		var newResults []SearchResult
-		for _, result := range results {
-			if searchByNameTest(result.Name, word) {
-				newResults = append(newResults, result)
-			}
-		}
-		results = newResults
+	total := createGamelists(*gamelistDir, systemPathsMap, *progress, *quiet, *noDupes)
+
+	if total == 0 {
+		os.Exit(8)
+	} else {
+		os.Exit(0)
 	}
-
-	return results
-}
-
-func (idx *Index) SearchAllByWords(query string) []SearchResult {
-	var results []SearchResult
-	for _, system := range utils.SortedMapKeys(idx.files) {
-		results = append(results, idx.SearchSystemByWords(system, query)...)
-	}
-	return results
-}
-
-func (idx *Index) Total() int {
-	total := 0
-	for system := range idx.files {
-		total += len(idx.files[system]["paths"])
-	}
-	return total
-}
-
-func (idx *Index) Systems() []string {
-	return utils.SortedMapKeys(idx.files)
 }
