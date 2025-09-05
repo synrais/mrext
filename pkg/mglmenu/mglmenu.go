@@ -2,6 +2,8 @@ package main
 
 import (
     "bufio"
+    "flag"
+    "fmt"
     "os"
     "os/exec"
     "path/filepath"
@@ -35,10 +37,8 @@ func loadSystems() map[string][]Game {
     return systems
 }
 
-func main() {
+func runInteractive(systems map[string][]Game) {
     app := tview.NewApplication()
-    systems := loadSystems()
-
     sysList := tview.NewList()
     gameList := tview.NewList()
 
@@ -66,7 +66,40 @@ func main() {
         app.SetRoot(sysList, true).SetFocus(sysList)
     })
 
+    // also allow exiting from system list with Esc
+    sysList.SetDoneFunc(func() {
+        app.Stop()
+    })
+
+    // log to file
+    logFile, _ := os.OpenFile("/tmp/mglmenu.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+    defer logFile.Close()
+    fmt.Fprintln(logFile, "mglmenu started")
+
     if err := app.SetRoot(sysList, true).Run(); err != nil {
+        fmt.Fprintln(logFile, "error:", err)
         panic(err)
+    }
+}
+
+func runDebug(systems map[string][]Game) {
+    for sys, games := range systems {
+        fmt.Println("System:", sys)
+        for _, g := range games {
+            fmt.Println("   ", g.Title, "=>", g.Path)
+        }
+    }
+}
+
+func main() {
+    debug := flag.Bool("debug", false, "run in debug (non-TUI) mode")
+    flag.Parse()
+
+    systems := loadSystems()
+
+    if *debug {
+        runDebug(systems)
+    } else {
+        runInteractive(systems)
     }
 }
