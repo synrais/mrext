@@ -37,10 +37,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	svc := service.New("sam", func() {
+	service.Run("sam", func() {
 		runSAM(cfg, *delayFlag, *randomFlag, *cycleAllFlag)
 	})
-	svc.Run()
 }
 
 func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
@@ -49,19 +48,9 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 
 	// === GAME SCAN ===
 	systems := games.AllSystems()
-	exclude := make(map[string]bool)
-
-	if cfg.Exclude != nil {
-		for _, id := range cfg.Exclude {
-			exclude[strings.TrimSpace(id)] = true
-		}
-	}
-
 	gameLists := make(map[string][]string)
+
 	for _, sys := range systems {
-		if exclude[sys.Id] {
-			continue
-		}
 		folders := games.GetSystemPaths(cfg, []games.System{sys})
 		var sysFiles []string
 		for _, folder := range folders {
@@ -77,13 +66,6 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 	if len(gameLists) == 0 {
 		log.Warn("No games found")
 		return
-	}
-
-	// === OVERLAY ===
-	var fb framebuffer.Framebuffer
-	if cfg.ShowOverlay {
-		fb.Open()
-		defer fb.Close()
 	}
 
 	// === INDEXING ===
@@ -111,14 +93,8 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 
 			game := files[idx]
 			name := strings.TrimSuffix(filepath.Base(game), filepath.Ext(game))
-			overlayText := fmt.Sprintf("Now Playing: %s [%s]", name, sys)
+			log.Info("Launching %s [%s]", name, sys)
 
-			if cfg.ShowOverlay {
-				fb.Fill(framebuffer.Color{0, 0, 0})
-				fb.DrawString(20, 20, overlayText)
-			}
-
-			log.Info("Launching %s <%s>", sys, game)
 			if err := mister.LaunchGenericFile(cfg, game); err != nil {
 				log.Error("Launch failed: %s", err)
 			}
@@ -130,7 +106,7 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 					break
 				}
 
-				// poll gamepads
+				// poll gamepad
 				events, _ := input.ReadAll()
 				for _, e := range events {
 					if e.Pressed {
@@ -142,14 +118,14 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 							log.Info("Exit requested (SELECT)")
 							return
 						case "DPAD_RIGHT":
-							log.Info("Next game requested (RIGHT)")
+							log.Info("Next game (RIGHT)")
 							idx++
 							if idx >= len(files) {
 								idx = 0
 							}
 							goto nextGame
 						case "DPAD_LEFT":
-							log.Info("Previous game requested (LEFT)")
+							log.Info("Previous game (LEFT)")
 							idx--
 							if idx < 0 {
 								idx = len(files) - 1
@@ -168,10 +144,10 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 						log.Info("Exit requested (q)")
 						return
 					case "n":
-						log.Info("Next game requested (n)")
+						log.Info("Next game (n)")
 						goto nextGame
 					case "p":
-						log.Info("Previous game requested (p)")
+						log.Info("Previous game (p)")
 						idx--
 						if idx < 0 {
 							idx = len(files) - 1
