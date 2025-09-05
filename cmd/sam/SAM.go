@@ -10,10 +10,11 @@ import (
 	"time"
 
 	"github.com/wizzomafizzo/mrext/pkg/config"
-	"github.com/wizzomafizzo/mrext/pkg/curses"
-	"github.com/wizzomafizzo/mrext/pkg/framebuffer"
 	"github.com/wizzomafizzo/mrext/pkg/games"
-	"github.com/wizzomafizzo/mrext/pkg/input"
+	"github.com/wizzomafizzo/mrext/pkg/input/gamepad"
+	"github.com/wizzomafizzo/mrext/pkg/input/keyboard"
+	"github.com/wizzomafizzo/mrext/pkg/curses/listpicker"
+	"github.com/wizzomafizzo/mrext/pkg/curses/onscreenkeyboard"
 	"github.com/wizzomafizzo/mrext/pkg/mister"
 	"github.com/wizzomafizzo/mrext/pkg/service"
 	"github.com/wizzomafizzo/mrext/pkg/sqlindex"
@@ -37,10 +38,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	svc := service.New("sam", func() {
-		runSAM(cfg, *delayFlag, *randomFlag, *cycleAllFlag)
-	})
-	svc.Run()
+	runSAM(cfg, *delayFlag, *randomFlag, *cycleAllFlag)
 }
 
 func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
@@ -49,16 +47,9 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 
 	// === GAME SCAN ===
 	systems := games.AllSystems()
-	exclude := make(map[string]bool)
-	for _, id := range cfg.Exclude {
-		exclude[strings.TrimSpace(id)] = true
-	}
-
 	gameLists := make(map[string][]string)
+
 	for _, sys := range systems {
-		if exclude[sys.Id] {
-			continue
-		}
 		folders := games.GetSystemPaths(cfg, []games.System{sys})
 		var sysFiles []string
 		for _, folder := range folders {
@@ -76,15 +67,14 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 		return
 	}
 
-	// === OVERLAY ===
-	var fb framebuffer.Framebuffer
-	if cfg.ShowOverlay {
-		fb.Open()
-		defer fb.Close()
-	}
-
 	// === INDEXING ===
-	sqlindex.Generate(gameLists)
+	var pairs [][2]string
+	for sys, files := range gameLists {
+		for _, f := range files {
+			pairs = append(pairs, [2]string{sys, f})
+		}
+	}
+	sqlindex.Generate(pairs, func(_ int) {})
 
 	// === MAIN LOOP ===
 	for sys, files := range gameLists {
@@ -102,12 +92,6 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 
 			game := files[idx]
 			name := strings.TrimSuffix(filepath.Base(game), filepath.Ext(game))
-			overlayText := fmt.Sprintf("Now Playing: %s [%s]", name, sys)
-
-			if cfg.ShowOverlay {
-				fb.Fill(framebuffer.Color{0, 0, 0})
-				fb.DrawString(20, 20, overlayText)
-			}
 
 			log.Info("Launching %s <%s>", sys, game)
 			if err := mister.LaunchGenericFile(cfg, game); err != nil {
@@ -122,56 +106,53 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 				}
 
 				// poll gamepad
-				events, _ := input.ReadAllGamepads()
+				events, _ := gamepad.ReadAll()
 				for _, e := range events {
-					if e.Button == "START" && e.Pressed {
-						log.Info("Skip requested (START)")
-						goto nextGame
-					}
-					if e.Button == "SELECT" && e.Pressed {
-						log.Info("Exit requested (SELECT)")
-						return
-					}
-					if e.Button == "DPAD_RIGHT" && e.Pressed {
-						log.Info("Next game requested (RIGHT)")
-						idx++
-						if idx >= len(files) {
-							idx = 0
+					if e.Pressed {
+						switch e.Button {
+						case "START":
+							log.Info("Skip requested (START)")
+							goto nextGame
+						case "SELECT":
+							log.Info("Exit requested (SELECT)")
+							return
+						case "DPAD_RIGHT":
+							log.Info("Next game requested (RIGHT)")
+							idx++
+							if idx >= len(files) {
+								idx = 0
+							}
+							goto nextGame
+						case "DPAD_LEFT":
+							log.Info("Previous game requested (LEFT)")
+							idx--
+							if idx < 0 {
+								idx = len(files) - 1
+							}
+							goto nextGame
+						case "Y":
+							runSearchUI(cfg)
 						}
-						goto nextGame
-					}
-					if e.Button == "DPAD_LEFT" && e.Pressed {
-						log.Info("Previous game requested (LEFT)")
-						idx--
-						if idx < 0 {
-							idx = len(files) - 1
-						}
-						goto nextGame
-					}
-					if e.Button == "Y" && e.Pressed {
-						runSearchUI(cfg)
 					}
 				}
 
 				// poll keyboard
-				if key := input.ReadKey(); key != "" {
-					if key == "q" {
+				if key := keyboard.ReadKey(); key != "" {
+					switch key {
+					case "q":
 						log.Info("Exit requested (q)")
 						return
-					}
-					if key == "n" {
+					case "n":
 						log.Info("Next game requested (n)")
 						goto nextGame
-					}
-					if key == "p" {
+					case "p":
 						log.Info("Previous game requested (p)")
 						idx--
 						if idx < 0 {
 							idx = len(files) - 1
 						}
 						goto nextGame
-					}
-					if key == "/" {
+					case "/":
 						runSearchUI(cfg)
 					}
 				}
@@ -191,7 +172,7 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 }
 
 func runSearchUI(cfg *config.UserConfig) {
-	query := curses.RunOnscreenKeyboard("Search games:")
+	query := onscreenkeyboard.Run("Search games:")
 	if query == "" {
 		return
 	}
@@ -204,7 +185,7 @@ func runSearchUI(cfg *config.UserConfig) {
 	for _, r := range results {
 		labels = append(labels, fmt.Sprintf("[%s] %s", r.System, r.Name))
 	}
-	choice := curses.RunListPicker("Search Results", labels)
+	choice := listpicker.Run("Search Results", labels)
 	if choice < 0 || choice >= len(results) {
 		return
 	}
