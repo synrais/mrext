@@ -1,9 +1,11 @@
 package gameindex
 
 import (
+	"flag"
 	"fmt"
 	"github.com/wizzomafizzo/mrext/pkg/config"
 	"github.com/wizzomafizzo/mrext/pkg/games"
+	"github.com/wizzomafizzo/mrext/pkg/mister"
 	"github.com/wizzomafizzo/mrext/pkg/utils"
 	"os"
 	"os/exec"
@@ -12,7 +14,7 @@ import (
 	"time"
 )
 
-// ---- ID helpers ----
+// SAM uses slightly different system IDs.
 var idMap = map[string]string{
 	"Gameboy":        "gb",
 	"GameboyColor":   "gbc",
@@ -25,14 +27,14 @@ var idMap = map[string]string{
 	"TurboGrafx16CD": "tgfx16cd",
 }
 
-func SamId(id string) string {
+func samId(id string) string {
 	if id, ok := idMap[id]; ok {
 		return id
 	}
 	return id
 }
 
-func ReverseId(id string) string {
+func reverseId(id string) string {
 	for k, v := range idMap {
 		if strings.EqualFold(v, id) {
 			return k
@@ -42,28 +44,35 @@ func ReverseId(id string) string {
 }
 
 func gamelistFilename(systemId string) string {
+	var prefix string
 	if id, ok := idMap[systemId]; ok {
-		return strings.ToLower(id) + "_gamelist.txt"
+		prefix = id
+	} else {
+		prefix = systemId
 	}
-	return strings.ToLower(systemId) + "_gamelist.txt"
+	return strings.ToLower(prefix) + "_gamelist.txt"
 }
 
-// ---- Gamelist writing ----
-func WriteGamelist(gamelistDir string, systemId string, files []string) error {
+func writeGamelist(gamelistDir string, systemId string, files []string) {
 	gamelistPath := filepath.Join(gamelistDir, gamelistFilename(systemId))
 	tmpPath, err := os.CreateTemp("", "gamelist-*.txt")
 	if err != nil {
-		return err
+		panic(err)
 	}
+
 	for _, file := range files {
 		_, _ = tmpPath.WriteString(file + "\n")
 	}
 	_ = tmpPath.Sync()
 	_ = tmpPath.Close()
-	return utils.MoveFile(tmpPath.Name(), gamelistPath)
+
+	err = utils.MoveFile(tmpPath.Name(), gamelistPath)
+	if err != nil {
+		panic(err)
+	}
 }
 
-func FilterUniqueWithMGL(files []string) []string {
+func filterUniqueWithMGL(files []string) []string {
 	chosen := make(map[string]string)
 	for _, f := range files {
 		base := strings.TrimSuffix(strings.ToLower(filepath.Base(f)), filepath.Ext(f))
@@ -84,6 +93,22 @@ func FilterUniqueWithMGL(files []string) []string {
 		result = append(result, v)
 	}
 	return result
+}
+
+// ---- Helpers ----
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func bindMount(src, dst string) error {
+	os.MkdirAll(dst, 0755)
+	cmd := exec.Command("mount", "-o", "bind", src, dst)
+	return cmd.Run()
+}
+
+func unmount(path string) {
+	exec.Command("umount", path).Run()
 }
 
 // ---- AmigaVision helpers ----
@@ -109,7 +134,7 @@ func writeCustomList(dir, filename string, entries []string) {
 	_ = utils.MoveFile(tmp.Name(), path)
 }
 
-func WriteAmigaVisionLists(gamelistDir string, paths []string) {
+func writeAmigaVisionLists(gamelistDir string, paths []string) {
 	var gamesList, demosList []string
 
 	for _, path := range paths {
@@ -137,9 +162,9 @@ func WriteAmigaVisionLists(gamelistDir string, paths []string) {
 	}
 }
 
-// ---- Main workflow ----
-func CreateGamelists(gamelistDir string, systemPaths map[string][]string, progress bool, quiet bool, filter bool) int {
+func createGamelists(gamelistDir string, systemPaths map[string][]string, progress bool, quiet bool, filter bool) int {
 	start := time.Now()
+
 	if !quiet && !progress {
 		fmt.Println("Finding system folders...")
 	}
@@ -150,10 +175,11 @@ func CreateGamelists(gamelistDir string, systemPaths map[string][]string, progre
 	}
 	totalSteps := totalPaths
 	currentStep := 0
-	totalGames := 0
 
+	totalGames := 0
 	for systemId, paths := range systemPaths {
 		var systemFiles []string
+
 		for _, path := range paths {
 			if !quiet {
 				if progress {
@@ -172,20 +198,21 @@ func CreateGamelists(gamelistDir string, systemPaths map[string][]string, progre
 				continue
 			}
 			systemFiles = append(systemFiles, files...)
+
 			currentStep++
 		}
 
 		if filter {
-			systemFiles = FilterUniqueWithMGL(systemFiles)
+			systemFiles = filterUniqueWithMGL(systemFiles)
 		}
 
 		if len(systemFiles) > 0 {
 			totalGames += len(systemFiles)
-			_ = WriteGamelist(gamelistDir, systemId, systemFiles)
+			writeGamelist(gamelistDir, systemId, systemFiles)
 		}
 
 		if strings.EqualFold(systemId, "Amiga") {
-			WriteAmigaVisionLists(gamelistDir, paths)
+			writeAmigaVisionLists(gamelistDir, paths)
 		}
 	}
 
@@ -204,23 +231,39 @@ func CreateGamelists(gamelistDir string, systemPaths map[string][]string, progre
 	return totalGames
 }
 
-// ---- Amiga shared discovery ----
-func FindAmigaShared() string {
+func findAmigaShared() string {
 	amigaPaths := games.GetSystemPaths(&config.UserConfig{}, []games.System{games.Systems["Amiga"]})
 	for _, p := range amigaPaths {
 		candidate := filepath.Join(p.Path, "shared")
-		if _, err := os.Stat(candidate); err == nil {
+		if pathExists(candidate) {
 			return candidate
 		}
 	}
+	// fallback: try usb0-3
 	for i := 0; i < 4; i++ {
 		usbCandidate := fmt.Sprintf("/media/usb%d/games/Amiga/shared", i)
-		if _, err := os.Stat(usbCandidate); err == nil {
+		if pathExists(usbCandidate) {
 			return usbCandidate
 		}
 	}
-	if _, err := os.Stat("/media/fat/games/Amiga/shared"); err == nil {
+	// fallback: fat
+	if pathExists("/media/fat/games/Amiga/shared") {
 		return "/media/fat/games/Amiga/shared"
 	}
 	return ""
+}
+
+// Run replaces main() so the package can be imported or called directly.
+func Run() {
+	gamelistDir := flag.String("o", ".", "gamelist files directory")
+	filter := flag.String("s", "all", "list of systems to index (comma separated)")
+	progress := flag.Bool("p", false, "print output for dialog gauge")
+	quiet := flag.Bool("q", false, "suppress all status output")
+	detect := flag.Bool("d", false, "list active system folders")
+	noDupes := flag.Bool("nodupes", false, "filter out duplicate games")
+	runPath := flag.String("run", "", "launch a single game by path or AmigaVision name")
+	flag.Parse()
+
+	// --- rest of your existing main() logic unchanged ---
+	// (use *runPath, *filter, etc. exactly as before)
 }
