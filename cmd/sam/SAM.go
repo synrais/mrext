@@ -1,3 +1,4 @@
+// cmd/sam/SAM.go
 package main
 
 import (
@@ -115,7 +116,7 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 			overlayText := fmt.Sprintf("Now Playing: %s [%s]", name, sys)
 
 			fb.Fill(framebuffer.RGB{0, 0, 0})
-			fb.DrawText(20, 20, overlayText)
+			fb.DrawString(20, 20, overlayText)
 
 			log.Info("Launching %s <%s>", sys, game)
 			if err := mister.LaunchGenericFile(cfg, game); err != nil {
@@ -130,7 +131,7 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 				}
 
 				// poll gamepad
-				events, _ := input.ReadGamepads()
+				events, _ := input.ReadAll()
 				for _, e := range events {
 					if e.Pressed {
 						switch e.Button {
@@ -161,7 +162,7 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 				}
 
 				// poll keyboard
-				if key, _ := input.ReadKeyboard(); key != "" {
+				if key, _ := input.ReadKey(); key != "" {
 					switch key {
 					case "q":
 						log.Info("Exit requested (q)")
@@ -196,7 +197,7 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 }
 
 func runSearchUI(cfg *config.UserConfig) {
-	query := curses.OnscreenKeyboard("Search games:")
+	query := curses.RunOnscreenKeyboard("Search games:")
 	if query == "" {
 		return
 	}
