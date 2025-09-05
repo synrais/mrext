@@ -51,7 +51,6 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 	systems := games.AllSystems()
 	exclude := make(map[string]bool)
 
-	// if Exclude not in config, skip
 	if cfg.Exclude != nil {
 		for _, id := range cfg.Exclude {
 			exclude[strings.TrimSpace(id)] = true
@@ -88,17 +87,13 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 	}
 
 	// === INDEXING ===
-	flat := [][2]string{}
+	var flat [][2]string
 	for sys, files := range gameLists {
 		for _, f := range files {
 			flat = append(flat, [2]string{sys, f})
 		}
 	}
 	sqlindex.Generate(flat, nil)
-
-	// === INPUT SETUP ===
-	kb := input.NewKeyboard()
-	gp := input.NewGamepad()
 
 	// === MAIN LOOP ===
 	for sys, files := range gameLists {
@@ -119,8 +114,8 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 			overlayText := fmt.Sprintf("Now Playing: %s [%s]", name, sys)
 
 			if cfg.ShowOverlay {
-				fb.Fill(framebuffer.RGB{0, 0, 0})
-				fb.DrawText(20, 20, overlayText)
+				fb.Fill(framebuffer.Color{0, 0, 0})
+				fb.DrawString(20, 20, overlayText)
 			}
 
 			log.Info("Launching %s <%s>", sys, game)
@@ -135,8 +130,9 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 					break
 				}
 
-				// poll gamepad
-				for _, e := range gp.Poll() {
+				// poll gamepads
+				events, _ := input.ReadAll()
+				for _, e := range events {
 					if e.Pressed {
 						switch e.Button {
 						case "START":
@@ -166,7 +162,7 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 				}
 
 				// poll keyboard
-				if key := kb.Poll(); key != "" {
+				if key := input.ReadKey(); key != "" {
 					switch key {
 					case "q":
 						log.Info("Exit requested (q)")
@@ -201,7 +197,7 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 }
 
 func runSearchUI(cfg *config.UserConfig) {
-	query := curses.RunOnscreenKeyboard("Search games:")
+	query := curses.OnscreenKeyboard("Search games:")
 	if query == "" {
 		return
 	}
@@ -214,7 +210,7 @@ func runSearchUI(cfg *config.UserConfig) {
 	for _, r := range results {
 		labels = append(labels, fmt.Sprintf("[%s] %s", r.System, r.Name))
 	}
-	choice := curses.RunListPicker("Search Results", labels)
+	choice := curses.ListPicker("Search Results", labels)
 	if choice < 0 || choice >= len(results) {
 		return
 	}
