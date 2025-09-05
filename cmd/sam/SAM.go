@@ -62,19 +62,9 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 
 	// === GAME SCAN ===
 	systems := games.AllSystems()
-	exclude := make(map[string]bool)
-
-	if cfg.Exclude != nil {
-		for _, id := range cfg.Exclude {
-			exclude[strings.TrimSpace(id)] = true
-		}
-	}
-
 	gameLists := make(map[string][]string)
+
 	for _, sys := range systems {
-		if exclude[sys.Id] {
-			continue
-		}
 		folders := games.GetSystemPaths(cfg, []games.System{sys})
 		var sysFiles []string
 		for _, folder := range folders {
@@ -94,10 +84,8 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 
 	// === OVERLAY ===
 	var fb framebuffer.Framebuffer
-	if cfg.ShowOverlay {
-		fb.Open()
-		defer fb.Close()
-	}
+	fb.Open()
+	defer fb.Close()
 
 	// === INDEXING ===
 	flat := [][2]string{}
@@ -126,10 +114,8 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 			name := strings.TrimSuffix(filepath.Base(game), filepath.Ext(game))
 			overlayText := fmt.Sprintf("Now Playing: %s [%s]", name, sys)
 
-			if cfg.ShowOverlay {
-				fb.Fill(framebuffer.RGB{0, 0, 0})
-				fb.DrawText(20, 20, overlayText)
-			}
+			fb.Fill(framebuffer.RGB{0, 0, 0})
+			fb.DrawText(20, 20, overlayText)
 
 			log.Info("Launching %s <%s>", sys, game)
 			if err := mister.LaunchGenericFile(cfg, game); err != nil {
@@ -175,7 +161,7 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 				}
 
 				// poll keyboard
-				if key := input.ReadKeyboard(); key != "" {
+				if key, _ := input.ReadKeyboard(); key != "" {
 					switch key {
 					case "q":
 						log.Info("Exit requested (q)")
@@ -223,7 +209,7 @@ func runSearchUI(cfg *config.UserConfig) {
 	for _, r := range results {
 		labels = append(labels, fmt.Sprintf("[%s] %s", r.System, r.Name))
 	}
-	choice, _, _ := curses.ListPicker("Search Results", labels)
+	choice, _, _ := curses.ListPicker(nil, curses.ListPickerOpts{}, labels)
 	if choice < 0 || choice >= len(results) {
 		return
 	}
