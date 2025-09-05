@@ -253,17 +253,116 @@ func findAmigaShared() string {
 	return ""
 }
 
-// Run replaces main() so the package can be imported or called directly.
-func Run() {
-	gamelistDir := flag.String("o", ".", "gamelist files directory")
-	filter := flag.String("s", "all", "list of systems to index (comma separated)")
-	progress := flag.Bool("p", false, "print output for dialog gauge")
-	quiet := flag.Bool("q", false, "suppress all status output")
-	detect := flag.Bool("d", false, "list active system folders")
-	noDupes := flag.Bool("nodupes", false, "filter out duplicate games")
-	runPath := flag.String("run", "", "launch a single game by path or AmigaVision name")
-	flag.Parse()
+// 🔑 Entry point for this tool when called from SAM
+func RunCLI(args []string) {
+	fs := flag.NewFlagSet("gameindex", flag.ExitOnError)
+	gamelistDir := fs.String("o", ".", "gamelist files directory")
+	filter := fs.String("s", "all", "list of systems to index (comma separated)")
+	progress := fs.Bool("p", false, "print output for dialog gauge")
+	quiet := fs.Bool("q", false, "suppress all status output")
+	detect := fs.Bool("d", false, "list active system folders")
+	noDupes := fs.Bool("nodupes", false, "filter out duplicate games")
+	runPath := fs.String("run", "", "launch a single game by path or AmigaVision name")
+	_ = fs.Parse(args)
 
-	// --- rest of your existing main() logic unchanged ---
-	// (use *runPath, *filter, etc. exactly as before)
+	if *runPath != "" {
+		// Case 1: AmigaVision name (anything without slash/backslash)
+		if !strings.ContainsAny(*runPath, "/\\") {
+			amigaShared := findAmigaShared()
+			if amigaShared == "" {
+				fmt.Fprintln(os.Stderr, "games/Amiga/shared folder not found")
+				os.Exit(1)
+			}
+
+			// Create tmp copy of shared
+			tmpShared := "/tmp/.SAM_tmp/Amiga_shared"
+			os.RemoveAll(tmpShared)
+			os.MkdirAll(tmpShared, 0755)
+
+			// Copy real shared into tmp
+			exec.Command("cp", "-a", amigaShared+"/.", tmpShared).Run()
+
+			// Write ags_boot with 2 lines (game + blank line, LF endings)
+			bootFile := filepath.Join(tmpShared, "ags_boot")
+			content := *runPath + "\n\n"
+			os.WriteFile(bootFile, []byte(content), 0644)
+
+			// Always unmount first (cleanup from previous run)
+			unmount(amigaShared)
+
+			// Bind tmp shared over real shared
+			if err := bindMount(tmpShared, amigaShared); err != nil {
+				fmt.Fprintf(os.Stderr, "Bind mount failed: %v\n", err)
+				os.Exit(1)
+			}
+
+			// Launch minimig (non-blocking)
+			err := mister.LaunchCore(&config.UserConfig{}, games.Systems["Amiga"])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Launch failed: %v\n", err)
+				os.Exit(1)
+			}
+			os.Exit(0)
+		}
+
+		// Case 2: MGL file
+		if strings.HasSuffix(strings.ToLower(*runPath), ".mgl") {
+			if err := mister.LaunchGenericFile(&config.UserConfig{}, *runPath); err != nil {
+				fmt.Fprintf(os.Stderr, "Launch failed: %v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			// Case 3: generic file path
+			system, _ := games.BestSystemMatch(&config.UserConfig{}, *runPath)
+			if err := mister.LaunchGame(&config.UserConfig{}, system, *runPath); err != nil {
+				fmt.Fprintf(os.Stderr, "Launch failed: %v\n", err)
+				os.Exit(1)
+			}
+		}
+		os.Exit(0)
+	}
+
+	var systems []games.System
+	if *filter == "all" {
+		systems = games.AllSystems()
+	} else {
+		for _, filterId := range strings.Split(*filter, ",") {
+			systemId := reverseId(filterId)
+
+			if system, ok := games.Systems[systemId]; ok {
+				systems = append(systems, system)
+				continue
+			}
+
+			system, err := games.LookupSystem(systemId)
+			if err != nil {
+				continue
+			}
+
+			systems = append(systems, *system)
+		}
+	}
+
+	if *detect {
+		results := games.GetActiveSystemPaths(&config.UserConfig{}, systems)
+		for _, r := range results {
+			fmt.Printf("%s:%s\n", strings.ToLower(samId(r.System.Id)), r.Path)
+		}
+		os.Exit(0)
+	}
+
+	systemPaths := games.GetSystemPaths(&config.UserConfig{}, systems)
+	systemPathsMap := make(map[string][]string)
+
+	for _, p := range systemPaths {
+		systemPathsMap[p.System.Id] = append(systemPathsMap[p.System.Id], p.Path)
+	}
+
+	total := createGamelists(*gamelistDir, systemPathsMap, *progress, *quiet, *noDupes)
+
+	if total == 0 {
+		os.Exit(8)
+	} else {
+		os.Exit(0)
+	}
 }
