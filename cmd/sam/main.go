@@ -4,7 +4,7 @@ import (
     "fmt"
     "os"
 
-    "github.com/synrais/mrext/pkg/gameindex"
+    "github.com/wizzomafizzo/mrext/pkg/gameindex"
 )
 
 func main() {
