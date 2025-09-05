@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"github.com/wizzomafizzo/mrext/pkg/config"
+	"github.com/wizzomafizzo/mrext/pkg/curses"
+	"github.com/wizzomafizzo/mrext/pkg/framebuffer"
 	"github.com/wizzomafizzo/mrext/pkg/games"
+	"github.com/wizzomafizzo/mrext/pkg/input"
 	"github.com/wizzomafizzo/mrext/pkg/mister"
 	"github.com/wizzomafizzo/mrext/pkg/service"
 	"github.com/wizzomafizzo/mrext/pkg/sqlindex"
-	"github.com/wizzomafizzo/mrext/pkg/input"
-	"github.com/wizzomafizzo/mrext/pkg/curses"
 )
 
 var (
@@ -26,6 +27,7 @@ func main() {
 	delayFlag := flag.Int("delay", 30, "seconds between games")
 	randomFlag := flag.Bool("random", false, "random order")
 	cycleAllFlag := flag.Bool("cycle-all", false, "cycle through all systems")
+	serviceCmd := flag.String("service", "", "service command: start|stop|restart|status|exec")
 	flag.Parse()
 
 	log = service.NewLogger("sam")
@@ -36,10 +38,22 @@ func main() {
 		os.Exit(1)
 	}
 
-	svc := service.New("sam", func() {
-		runSAM(cfg, *delayFlag, *randomFlag, *cycleAllFlag)
+	svc, err := service.NewService(service.ServiceArgs{
+		Name:   "sam",
+		Logger: log,
+		Entry: func() (func() error, error) {
+			return func() error {
+				runSAM(cfg, *delayFlag, *randomFlag, *cycleAllFlag)
+				return nil
+			}, nil
+		},
 	})
-	svc.Run()
+	if err != nil {
+		log.Error("Failed to create service: %s", err)
+		os.Exit(1)
+	}
+
+	svc.ServiceHandler(serviceCmd)
 }
 
 func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
@@ -48,9 +62,19 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 
 	// === GAME SCAN ===
 	systems := games.AllSystems()
-	gameLists := make(map[string][]string)
+	exclude := make(map[string]bool)
 
+	if cfg.Exclude != nil {
+		for _, id := range cfg.Exclude {
+			exclude[strings.TrimSpace(id)] = true
+		}
+	}
+
+	gameLists := make(map[string][]string)
 	for _, sys := range systems {
+		if exclude[sys.Id] {
+			continue
+		}
 		folders := games.GetSystemPaths(cfg, []games.System{sys})
 		var sysFiles []string
 		for _, folder := range folders {
@@ -68,6 +92,13 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 		return
 	}
 
+	// === OVERLAY ===
+	var fb framebuffer.Framebuffer
+	if cfg.ShowOverlay {
+		fb.Open()
+		defer fb.Close()
+	}
+
 	// === INDEXING ===
 	flat := [][2]string{}
 	for sys, files := range gameLists {
@@ -75,7 +106,7 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 			flat = append(flat, [2]string{sys, f})
 		}
 	}
-	sqlindex.Generate(flat, nil)
+	_ = sqlindex.Generate(flat, func(int) {})
 
 	// === MAIN LOOP ===
 	for sys, files := range gameLists {
@@ -93,8 +124,14 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 
 			game := files[idx]
 			name := strings.TrimSuffix(filepath.Base(game), filepath.Ext(game))
-			log.Info("Launching %s <%s>", sys, game)
+			overlayText := fmt.Sprintf("Now Playing: %s [%s]", name, sys)
 
+			if cfg.ShowOverlay {
+				fb.Fill(framebuffer.RGB{0, 0, 0})
+				fb.DrawText(20, 20, overlayText)
+			}
+
+			log.Info("Launching %s <%s>", sys, game)
 			if err := mister.LaunchGenericFile(cfg, game); err != nil {
 				log.Error("Launch failed: %s", err)
 			}
@@ -106,8 +143,8 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 					break
 				}
 
-				// poll gamepad + keyboard
-				events, _ := input.ReadAll()
+				// poll gamepad
+				events, _ := input.ReadGamepads()
 				for _, e := range events {
 					if e.Pressed {
 						switch e.Button {
@@ -137,7 +174,8 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 					}
 				}
 
-				if key := input.ReadKey(); key != "" {
+				// poll keyboard
+				if key := input.ReadKeyboard(); key != "" {
 					switch key {
 					case "q":
 						log.Info("Exit requested (q)")
@@ -181,14 +219,11 @@ func runSearchUI(cfg *config.UserConfig) {
 		log.Info("No results for %q", query)
 		return
 	}
-
 	var labels []string
 	for _, r := range results {
 		labels = append(labels, fmt.Sprintf("[%s] %s", r.System, r.Name))
 	}
-
-	// curses.ListPicker returns (choice, key, err)
-	choice, _, _ := curses.ListPicker(nil, curses.ListPickerOpts{Title: "Search Results"}, labels)
+	choice, _, _ := curses.ListPicker("Search Results", labels)
 	if choice < 0 || choice >= len(results) {
 		return
 	}
