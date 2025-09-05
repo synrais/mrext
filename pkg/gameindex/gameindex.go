@@ -253,7 +253,7 @@ func findAmigaShared() string {
 	return ""
 }
 
-// Run is the entry point for the gameindex tool when called from SAM.
+// 🔑 Entry point for the gameindex tool when called from SAM
 func Run(args []string) {
 	fs := flag.NewFlagSet("gameindex", flag.ExitOnError)
 	gamelistDir := fs.String("o", ".", "gamelist files directory")
