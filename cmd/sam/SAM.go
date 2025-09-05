@@ -1,27 +1,23 @@
 package main
 
 import (
-	"flag"
-	"fmt"
-	"math/rand"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
+    "flag"
+    "fmt"
+    "math/rand"
+    "os"
+    "path/filepath"
+    "strings"
+    "time"
 
-	"github.com/wizzomafizzo/mrext/pkg/arcadedb"
-	"github.com/wizzomafizzo/mrext/pkg/config"
-	"github.com/wizzomafizzo/mrext/pkg/dupes"
-	"github.com/wizzomafizzo/mrext/pkg/framebuffer"
-	"github.com/wizzomafizzo/mrext/pkg/games"
-	"github.com/wizzomafizzo/mrext/pkg/gamepad"
-	"github.com/wizzomafizzo/mrext/pkg/keyboard"
-	"github.com/wizzomafizzo/mrext/pkg/listpicker"
-	"github.com/wizzomafizzo/mrext/pkg/logging"
-	"github.com/wizzomafizzo/mrext/pkg/mister"
-	"github.com/wizzomafizzo/mrext/pkg/onscreenkeyboard"
-	"github.com/wizzomafizzo/mrext/pkg/service"
-	"github.com/wizzomafizzo/mrext/pkg/sqlindex"
+    "github.com/wizzomafizzo/mrext/pkg/metadata"       // arcadedb
+    "github.com/wizzomafizzo/mrext/pkg/config"
+    "github.com/wizzomafizzo/mrext/pkg/framebuffer"
+    "github.com/wizzomafizzo/mrext/pkg/games"          // includes dupes
+    "github.com/wizzomafizzo/mrext/pkg/input"          // gamepad + keyboard
+    "github.com/wizzomafizzo/mrext/pkg/curses"         // listpicker + onscreenkeyboard
+    "github.com/wizzomafizzo/mrext/pkg/service"        // logging + service
+    "github.com/wizzomafizzo/mrext/pkg/mister"
+    "github.com/wizzomafizzo/mrext/pkg/sqlindex"
 )
 
 var (
