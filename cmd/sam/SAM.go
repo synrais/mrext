@@ -1,4 +1,3 @@
-// cmd/sam/SAM.go
 package main
 
 import (
@@ -11,18 +10,16 @@ import (
 	"time"
 
 	"github.com/wizzomafizzo/mrext/pkg/config"
-	"github.com/wizzomafizzo/mrext/pkg/curses"
 	"github.com/wizzomafizzo/mrext/pkg/framebuffer"
 	"github.com/wizzomafizzo/mrext/pkg/games"
-	"github.com/wizzomafizzo/mrext/pkg/input"
+	"github.com/wizzomafizzo/mrext/pkg/input" // Proper import for input
 	"github.com/wizzomafizzo/mrext/pkg/mister"
 	"github.com/wizzomafizzo/mrext/pkg/service"
 	"github.com/wizzomafizzo/mrext/pkg/sqlindex"
+	"github.com/wizzomafizzo/mrext/pkg/curses" // Proper import for curses
 )
 
-var (
-	log *service.Logger
-)
+var log *service.Logger
 
 func main() {
 	delayFlag := flag.Int("delay", 30, "seconds between games")
@@ -115,7 +112,7 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 			name := strings.TrimSuffix(filepath.Base(game), filepath.Ext(game))
 			overlayText := fmt.Sprintf("Now Playing: %s [%s]", name, sys)
 
-			fb.Fill(framebuffer.RGB{0, 0, 0})
+			fb.Fill(framebuffer.Color{0, 0, 0})
 			fb.DrawString(20, 20, overlayText)
 
 			log.Info("Launching %s <%s>", sys, game)
@@ -131,7 +128,7 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 				}
 
 				// poll gamepad
-				events, _ := input.ReadAll()
+				events, _ := input.ReadAll() // Correct call for input
 				for _, e := range events {
 					if e.Pressed {
 						switch e.Button {
@@ -162,7 +159,7 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 				}
 
 				// poll keyboard
-				if key, _ := input.ReadKey(); key != "" {
+				if key := keyboard.ReadKey(); key != "" { // Correct call for keyboard input
 					switch key {
 					case "q":
 						log.Info("Exit requested (q)")
@@ -197,7 +194,7 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 }
 
 func runSearchUI(cfg *config.UserConfig) {
-	query := curses.RunOnscreenKeyboard("Search games:")
+	query := onscreenkeyboard.RunOnscreenKeyboard("Search games:") // Correct call for onscreen keyboard
 	if query == "" {
 		return
 	}
@@ -210,7 +207,7 @@ func runSearchUI(cfg *config.UserConfig) {
 	for _, r := range results {
 		labels = append(labels, fmt.Sprintf("[%s] %s", r.System, r.Name))
 	}
-	choice, _, _ := curses.ListPicker(nil, curses.ListPickerOpts{}, labels)
+	choice, _, _ := listpicker.ListPicker(nil, listpicker.ListPickerOpts{}, labels) // Correct ListPicker
 	if choice < 0 || choice >= len(results) {
 		return
 	}
