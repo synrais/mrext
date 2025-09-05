@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/wizzomafizzo/mrext/pkg/config"
-	"github.com/wizzomafizzo/mrext/pkg/framebuffer"
 	"github.com/wizzomafizzo/mrext/pkg/games"
-	"github.com/wizzomafizzo/mrext/pkg/input"
+	"github.com/wizzomafizzo/mrext/pkg/input/gamepad"
+	"github.com/wizzomafizzo/mrext/pkg/input/keyboard"
 	"github.com/wizzomafizzo/mrext/pkg/curses"
 	"github.com/wizzomafizzo/mrext/pkg/mister"
 	"github.com/wizzomafizzo/mrext/pkg/service"
@@ -37,9 +37,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	service.Run("sam", func() {
+	svc := service.New("sam", func() {
 		runSAM(cfg, *delayFlag, *randomFlag, *cycleAllFlag)
 	})
+	svc.Run()
 }
 
 func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
@@ -107,7 +108,7 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 				}
 
 				// poll gamepad
-				events, _ := input.ReadAll()
+				events, _ := gamepad.ReadAll()
 				for _, e := range events {
 					if e.Pressed {
 						switch e.Button {
@@ -138,7 +139,7 @@ func runSAM(cfg *config.UserConfig, delay int, random, cycleAll bool) {
 				}
 
 				// poll keyboard
-				if key := input.ReadKey(); key != "" {
+				if key := keyboard.ReadKey(); key != "" {
 					switch key {
 					case "q":
 						log.Info("Exit requested (q)")
@@ -186,8 +187,8 @@ func runSearchUI(cfg *config.UserConfig) {
 	for _, r := range results {
 		labels = append(labels, fmt.Sprintf("[%s] %s", r.System, r.Name))
 	}
-	choice := curses.ListPicker("Search Results", labels)
-	if choice < 0 || choice >= len(results) {
+	choice, _, err := curses.ListPicker(nil, curses.ListPickerOpts{Title: "Search Results"}, labels)
+	if err != nil || choice < 0 || choice >= len(results) {
 		return
 	}
 	selected := results[choice]
