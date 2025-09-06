@@ -114,15 +114,12 @@ func LoadUserConfig(name string, defaultConfig *UserConfig) (*UserConfig, error)
 		return defaultConfig, err
 	}
 
-	// 🔑 Force case-insensitive matching for *all* keys
 	cfg.NameMapper = ini.NameMapper(strings.ToLower)
 
-	// Map config into struct
 	if err := cfg.MapTo(defaultConfig); err != nil {
 		return defaultConfig, err
 	}
 
-	// Handle Disable.<System> sections (case-insensitive)
 	for _, section := range cfg.Sections() {
 		secName := strings.ToLower(section.Name())
 		if strings.HasPrefix(secName, "disable.") {
