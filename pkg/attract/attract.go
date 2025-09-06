@@ -246,7 +246,7 @@ func Run(_ []string) {
 		fmt.Printf("%s - %s <%s>\n", time.Now().Format("15:04:05"), name, gamePath)
 
 		// Launch game
-		run.Run([]string{gamePath})
+		go run.Run([]string{gamePath})
 
 		// Update list
 		lines = append(lines[:index], lines[index+1:]...)
