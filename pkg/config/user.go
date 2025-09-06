@@ -115,7 +115,6 @@ func LoadUserConfig(name string, defaultConfig *UserConfig) (*UserConfig, error)
 	}
 
 	cfg.NameMapper = func(raw string) string { return strings.ToLower(raw) }
-	cfg.SectionMapper = func(raw string) string { return strings.ToLower(raw) }
 
 	if err := cfg.MapTo(defaultConfig); err != nil {
 		return defaultConfig, err
