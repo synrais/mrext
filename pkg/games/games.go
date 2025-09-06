@@ -81,6 +81,17 @@ func MatchSystemFile(system System, path string) bool {
 	return false
 }
 
+func AllSystems() []System {
+	var systems []System
+
+	keys := utils.AlphaMapKeys(Systems)
+	for _, k := range keys {
+		systems = append(systems, Systems[k])
+	}
+
+	return systems
+}
+
 func AllSystemsExcept(excluded []string) []System {
 	var systems []System
 	excludeMap := make(map[string]bool)
