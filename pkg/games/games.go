@@ -72,7 +72,7 @@ func MatchSystemFile(system System, path string) bool {
 
 	for _, args := range system.Slots {
 		for _, ext := range args.Exts {
-			if strings.HasSuffix(strings.ToLower(path), ext) {
+			if strings.EqualFold(filepath.Ext(path), ext) {
 				return true
 			}
 		}
@@ -81,36 +81,27 @@ func MatchSystemFile(system System, path string) bool {
 	return false
 }
 
-func AllSystems() []System {
-	var systems []System
-
-	keys := utils.AlphaMapKeys(Systems)
-	for _, k := range keys {
-		systems = append(systems, Systems[k])
-	}
-
-	return systems
-}
-
 func AllSystemsExcept(excluded []string) []System {
 	var systems []System
 	excludeMap := make(map[string]bool)
 
+	// Normalize once (case-insensitive)
 	for _, e := range excluded {
-		excludeMap[strings.ToLower(strings.TrimSpace(e))] = true
+		excludeMap[strings.TrimSpace(e)] = true
 	}
 
 	keys := utils.AlphaMapKeys(Systems)
 	for _, k := range keys {
 		sys := Systems[k]
 
-		if excludeMap[strings.ToLower(sys.Id)] {
+		// Compare case-insensitively
+		if containsFold(excludeMap, sys.Id) {
 			continue
 		}
 
 		skip := false
 		for _, alias := range sys.Alias {
-			if excludeMap[strings.ToLower(alias)] {
+			if containsFold(excludeMap, alias) {
 				skip = true
 				break
 			}
@@ -123,6 +114,16 @@ func AllSystemsExcept(excluded []string) []System {
 	}
 
 	return systems
+}
+
+// helper: case-insensitive key lookup
+func containsFold(m map[string]bool, key string) bool {
+	for k := range m {
+		if strings.EqualFold(k, key) {
+			return true
+		}
+	}
+	return false
 }
 
 type resultsStack [][]string
