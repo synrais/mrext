@@ -49,11 +49,10 @@ func findAmigaShared() string {
 	return ""
 }
 
-// 🔑 Entry point for the run tool when called from SAM
-func Run(args []string) {
+// Run launches a game or AmigaVision target.
+func Run(args []string) error {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "Usage: SAM -run <path-or-name>")
-		os.Exit(1)
+		return fmt.Errorf("Usage: SAM -run <path-or-name>")
 	}
 	runPath := args[0]
 
@@ -61,55 +60,34 @@ func Run(args []string) {
 	if !strings.ContainsAny(runPath, "/\\") {
 		amigaShared := findAmigaShared()
 		if amigaShared == "" {
-			fmt.Fprintln(os.Stderr, "games/Amiga/shared folder not found")
-			os.Exit(1)
+			return fmt.Errorf("games/Amiga/shared folder not found")
 		}
 
-		// Create tmp copy of shared
 		tmpShared := "/tmp/.SAM_tmp/Amiga_shared"
 		os.RemoveAll(tmpShared)
 		os.MkdirAll(tmpShared, 0755)
 
-		// Copy real shared into tmp
 		exec.Command("cp", "-a", amigaShared+"/.", tmpShared).Run()
 
-		// Write ags_boot
 		bootFile := filepath.Join(tmpShared, "ags_boot")
 		content := runPath + "\n\n"
 		os.WriteFile(bootFile, []byte(content), 0644)
 
-		// Always unmount first
 		unmount(amigaShared)
 
-		// Bind tmp shared over real shared
 		if err := bindMount(tmpShared, amigaShared); err != nil {
-			fmt.Fprintf(os.Stderr, "Bind mount failed: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("Bind mount failed: %v", err)
 		}
 
-		// Launch minimig
-		err := mister.LaunchCore(&config.UserConfig{}, games.Systems["Amiga"])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Launch failed: %v\n", err)
-			os.Exit(1)
-		}
-		os.Exit(0)
+		return mister.LaunchCore(&config.UserConfig{}, games.Systems["Amiga"])
 	}
 
 	// Case 2: MGL file
 	if strings.HasSuffix(strings.ToLower(runPath), ".mgl") {
-		if err := mister.LaunchGenericFile(&config.UserConfig{}, runPath); err != nil {
-			fmt.Fprintf(os.Stderr, "Launch failed: %v\n", err)
-			os.Exit(1)
-		}
-		os.Exit(0)
+		return mister.LaunchGenericFile(&config.UserConfig{}, runPath)
 	}
 
 	// Case 3: generic file path
 	system, _ := games.BestSystemMatch(&config.UserConfig{}, runPath)
-	if err := mister.LaunchGame(&config.UserConfig{}, system, runPath); err != nil {
-		fmt.Fprintf(os.Stderr, "Launch failed: %v\n", err)
-		os.Exit(1)
-	}
-	os.Exit(0)
+	return mister.LaunchGame(&config.UserConfig{}, system, runPath)
 }
