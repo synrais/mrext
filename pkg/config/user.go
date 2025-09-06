@@ -114,15 +114,19 @@ func LoadUserConfig(name string, defaultConfig *UserConfig) (*UserConfig, error)
 		return defaultConfig, err
 	}
 
-	err = cfg.StrictMapTo(defaultConfig)
-	if err != nil {
+	// 🔑 Force case-insensitive matching for *all* keys
+	cfg.NameMapper = ini.NameMapper(strings.ToLower)
+
+	// Map config into struct
+	if err := cfg.MapTo(defaultConfig); err != nil {
 		return defaultConfig, err
 	}
 
+	// Handle Disable.<System> sections (case-insensitive)
 	for _, section := range cfg.Sections() {
-		if strings.HasPrefix(strings.ToLower(section.Name()), "disable.") {
-			sys := strings.TrimPrefix(section.Name(), "Disable.")
-			sys = strings.TrimPrefix(sys, "disable.") // handle lowercase too
+		secName := strings.ToLower(section.Name())
+		if strings.HasPrefix(secName, "disable.") {
+			sys := strings.TrimPrefix(secName, "disable.")
 			var rules DisableRules
 			_ = section.MapTo(&rules)
 			defaultConfig.Disable[sys] = rules
