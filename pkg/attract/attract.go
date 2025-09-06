@@ -1,3 +1,4 @@
+// pkg/attract/attract.go
 package attract
 
 import (
@@ -5,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -78,7 +80,6 @@ func matchesPattern(s, pattern string) bool {
 	p := strings.ToLower(pattern)
 	s = strings.ToLower(s)
 
-	// simple wildcard (* only)
 	if strings.HasPrefix(p, "*") && strings.HasSuffix(p, "*") {
 		return strings.Contains(s, strings.Trim(p, "*"))
 	}
@@ -102,25 +103,39 @@ func disabled(system string, gamePath string, cfg *config.UserConfig) bool {
 	ext := strings.ToLower(filepath.Ext(gamePath))
 	dir := strings.ToLower(filepath.Base(filepath.Dir(gamePath)))
 
-	// Check folders
 	for _, f := range rules.Folders {
 		if matchesPattern(dir, f) {
 			return true
 		}
 	}
-	// Check files
 	for _, f := range rules.Files {
 		if matchesPattern(base, f) {
 			return true
 		}
 	}
-	// Check extensions
 	for _, e := range rules.Extensions {
 		if strings.EqualFold(ext, e) {
 			return true
 		}
 	}
 	return false
+}
+
+// rebuildLists calls SAM -list to regenerate gamelists.
+func rebuildLists(listDir string) []string {
+	fmt.Println("⚠️  All gamelists empty. Rebuilding with SAM -list...")
+
+	exe, _ := os.Executable()
+	cmd := exec.Command(exe, "-list")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	_ = cmd.Run()
+
+	refreshed, _ := filepath.Glob(filepath.Join(listDir, "*_gamelist.txt"))
+	if len(refreshed) > 0 {
+		fmt.Printf("✓ Rebuilt %d gamelists, resuming Attract Mode.\n", len(refreshed))
+	}
+	return refreshed
 }
 
 // Run is the entry point for the attract tool.
@@ -132,7 +147,7 @@ func Run(_ []string) {
 	listDir := "/tmp/.SAM_List"
 	historyFile := "/tmp/.SAM_History.txt"
 
-	// Collect all gamelist files from listDir
+	// Collect gamelists
 	allFiles, err := filepath.Glob(filepath.Join(listDir, "*_gamelist.txt"))
 	if err != nil || len(allFiles) == 0 {
 		fmt.Println("No gamelists found in", listDir)
@@ -146,7 +161,6 @@ func Run(_ []string) {
 		for _, sys := range attractCfg.Systems {
 			allowed[strings.ToLower(strings.TrimSpace(sys))] = true
 		}
-
 		var filtered []string
 		for _, f := range allFiles {
 			base := strings.TrimSuffix(filepath.Base(f), "_gamelist.txt")
@@ -155,7 +169,7 @@ func Run(_ []string) {
 			}
 		}
 		if len(filtered) == 0 {
-			fmt.Println("No gamelists match the configured Systems in INI")
+			fmt.Println("No gamelists match Systems in INI")
 			os.Exit(1)
 		}
 		files = filtered
@@ -164,30 +178,62 @@ func Run(_ []string) {
 	// Seed random
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-	fmt.Printf("Attract mode running. Ctrl-C to exit.\n")
+	fmt.Println("Attract mode running. Ctrl-C to exit.")
 
 	for {
-		// Pick a random list file (already filtered by system IDs)
+		// Stop if no files left
+		if len(files) == 0 {
+			files = rebuildLists(listDir)
+
+			// Reapply system restriction
+			if len(attractCfg.Systems) > 0 {
+				allowed := map[string]bool{}
+				for _, sys := range attractCfg.Systems {
+					allowed[strings.ToLower(strings.TrimSpace(sys))] = true
+				}
+				var filtered []string
+				for _, f := range files {
+					base := strings.TrimSuffix(filepath.Base(f), "_gamelist.txt")
+					if allowed[strings.ToLower(base)] {
+						filtered = append(filtered, f)
+					}
+				}
+				files = filtered
+			}
+
+			if len(files) == 0 {
+				fmt.Println("❌ Failed to rebuild gamelists, exiting.")
+				return
+			}
+		}
+
+		// Pick a random list
 		listFile := files[r.Intn(len(files))]
 
-		// Load the list
+		// Load lines
 		lines, err := readLines(listFile)
 		if err != nil || len(lines) == 0 {
+			// remove exhausted list
+			for i, f := range files {
+				if f == listFile {
+					files = append(files[:i], files[i+1:]...)
+					break
+				}
+			}
 			continue
 		}
 
-		// Pick a game index
+		// Pick game
 		index := 0
 		if attractCfg.Random {
 			index = r.Intn(len(lines))
 		}
-
 		gamePath := lines[index]
 
-		// Get system ID from filename (e.g., nes_gamelist.txt -> NES)
+		// System from filename
 		systemID := strings.TrimSuffix(filepath.Base(listFile), "_gamelist.txt")
 
-		// Skip disabled games
+		// Apply disable rules
 		if disabled(systemID, gamePath, cfg) {
 			lines = append(lines[:index], lines[index+1:]...)
 			_ = writeLines(listFile, lines)
@@ -199,14 +245,14 @@ func Run(_ []string) {
 		name = strings.TrimSuffix(name, filepath.Ext(name))
 		fmt.Printf("%s - %s <%s>\n", time.Now().Format("15:04:05"), name, gamePath)
 
-		// Hand off to run package (blocking)
+		// Launch game
 		run.Run([]string{gamePath})
 
-		// Update list: remove played game
+		// Update list
 		lines = append(lines[:index], lines[index+1:]...)
 		_ = writeLines(listFile, lines)
 
-		// Append to history
+		// Append history
 		_ = appendLine(historyFile, gamePath)
 
 		// Wait
