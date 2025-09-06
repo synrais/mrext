@@ -1,16 +1,16 @@
-// pkg/attract/attract.go
 package attract
 
 import (
 	"bufio"
-	"flag"
 	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/wizzomafizzo/mrext/pkg/config"
 	"github.com/wizzomafizzo/mrext/pkg/run"
 )
 
@@ -58,45 +58,135 @@ func appendLine(path string, line string) error {
 	return err
 }
 
+// parsePlayTime handles "40" or "40-130"
+func parsePlayTime(value string, r *rand.Rand) time.Duration {
+	if strings.Contains(value, "-") {
+		parts := strings.SplitN(value, "-", 2)
+		min, _ := strconv.Atoi(strings.TrimSpace(parts[0]))
+		max, _ := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if max > min {
+			return time.Duration(r.Intn(max-min+1)+min) * time.Second
+		}
+		return time.Duration(min) * time.Second
+	}
+	secs, _ := strconv.Atoi(value)
+	return time.Duration(secs) * time.Second
+}
+
+// matchesPattern checks if string matches a wildcard (*foo*, bar*, *baz)
+func matchesPattern(s, pattern string) bool {
+	p := strings.ToLower(pattern)
+	s = strings.ToLower(s)
+
+	// simple wildcard (* only)
+	if strings.HasPrefix(p, "*") && strings.HasSuffix(p, "*") {
+		return strings.Contains(s, strings.Trim(p, "*"))
+	}
+	if strings.HasPrefix(p, "*") {
+		return strings.HasSuffix(s, strings.TrimPrefix(p, "*"))
+	}
+	if strings.HasSuffix(p, "*") {
+		return strings.HasPrefix(s, strings.TrimSuffix(p, "*"))
+	}
+	return s == p
+}
+
+// disabled checks if a game should be blocked by rules
+func disabled(system string, gamePath string, cfg *config.UserConfig) bool {
+	rules, ok := cfg.Disable[system]
+	if !ok {
+		return false
+	}
+
+	base := strings.ToLower(filepath.Base(gamePath))
+	ext := strings.ToLower(filepath.Ext(gamePath))
+	dir := strings.ToLower(filepath.Base(filepath.Dir(gamePath)))
+
+	// Check folders
+	for _, f := range rules.Folders {
+		if matchesPattern(dir, f) {
+			return true
+		}
+	}
+	// Check files
+	for _, f := range rules.Files {
+		if matchesPattern(base, f) {
+			return true
+		}
+	}
+	// Check extensions
+	for _, e := range rules.Extensions {
+		if strings.EqualFold(ext, e) {
+			return true
+		}
+	}
+	return false
+}
+
 // Run is the entry point for the attract tool.
-func Run(args []string) {
-	fs := flag.NewFlagSet("attract", flag.ExitOnError)
-	delay := fs.Int("delay", 40, "seconds between loading each game")
-	random := fs.Bool("random", false, "randomize the order of games")
-	listDir := fs.String("lists", "/tmp/.SAM_List", "directory containing gamelists")
-	historyFile := fs.String("history", "/tmp/.SAM_History.txt", "path to history file")
-	_ = fs.Parse(args)
+func Run(_ []string) {
+	// Load config
+	cfg, _ := config.LoadUserConfig("SAM", &config.UserConfig{})
+	attractCfg := cfg.Attract
+
+	listDir := "/tmp/.SAM_List"
+	historyFile := "/tmp/.SAM_History.txt"
 
 	// Collect all gamelist files from listDir
-	files, err := filepath.Glob(filepath.Join(*listDir, "*_gamelist.txt"))
+	files, err := filepath.Glob(filepath.Join(listDir, "*_gamelist.txt"))
 	if err != nil || len(files) == 0 {
-		fmt.Println("No gamelists found in", *listDir)
+		fmt.Println("No gamelists found in", listDir)
 		os.Exit(1)
 	}
 
 	// Seed random
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-	fmt.Printf("Attract mode running with %ds delay. Ctrl-C to exit.\n", *delay)
+	fmt.Printf("Attract mode running. Ctrl-C to exit.\n")
 
 	for {
 		// Pick a random list file
 		listFile := files[r.Intn(len(files))]
 
+		// Restrict by systems if configured
+		if len(attractCfg.Systems) > 0 {
+			base := strings.TrimSuffix(filepath.Base(listFile), "_gamelist.txt")
+			skip := true
+			for _, sys := range attractCfg.Systems {
+				if strings.EqualFold(sys, base) {
+					skip = false
+					break
+				}
+			}
+			if skip {
+				continue
+			}
+		}
+
 		// Load the list
 		lines, err := readLines(listFile)
 		if err != nil || len(lines) == 0 {
-			// Skip empty lists
 			continue
 		}
 
 		// Pick a game index
 		index := 0
-		if *random {
+		if attractCfg.Random {
 			index = r.Intn(len(lines))
 		}
 
 		gamePath := lines[index]
+
+		// Get system ID from filename (e.g., nes_gamelist.txt -> NES)
+		systemID := strings.TrimSuffix(filepath.Base(listFile), "_gamelist.txt")
+
+		// Skip disabled games
+		if disabled(systemID, gamePath, cfg) {
+			// Remove from list so we don’t retry endlessly
+			lines = append(lines[:index], lines[index+1:]...)
+			_ = writeLines(listFile, lines)
+			continue
+		}
 
 		// Display
 		name := filepath.Base(gamePath)
@@ -111,9 +201,10 @@ func Run(args []string) {
 		_ = writeLines(listFile, lines)
 
 		// Append to history
-		_ = appendLine(*historyFile, gamePath)
+		_ = appendLine(historyFile, gamePath)
 
 		// Wait
-		time.Sleep(time.Duration(*delay) * time.Second)
+		wait := parsePlayTime(attractCfg.PlayTime, r)
+		time.Sleep(wait)
 	}
 }
