@@ -581,9 +581,9 @@ var Systems = map[string]System{
 			},
 		},
 	},
-	"Genesis": {
-		Id:           "Genesis",
-		Name:         "Genesis",
+	"MegaDrive": {
+		Id:           "MegaDrive",
+		Name:         "MegaDrive",
 		Category:     CategoryConsole,
 		Manufacturer: ManufacturerSega,
 		ReleaseDate:  "1988-10-29",
