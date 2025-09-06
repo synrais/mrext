@@ -43,13 +43,10 @@ func reverseId(id string) string {
 }
 
 func gamelistFilename(systemId string) string {
-	var prefix string
 	if id, ok := idMap[systemId]; ok {
-		prefix = id
-	} else {
-		prefix = systemId
+		return strings.ToLower(id) + "_gamelist.txt"
 	}
-	return strings.ToLower(prefix) + "_gamelist.txt"
+	return strings.ToLower(systemId) + "_gamelist.txt"
 }
 
 func writeGamelist(gamelistDir string, systemId string, files []string) {
@@ -65,8 +62,7 @@ func writeGamelist(gamelistDir string, systemId string, files []string) {
 	_ = tmpPath.Sync()
 	_ = tmpPath.Close()
 
-	err = utils.MoveFile(tmpPath.Name(), gamelistPath)
-	if err != nil {
+	if err := utils.MoveFile(tmpPath.Name(), gamelistPath); err != nil {
 		panic(err)
 	}
 }
@@ -267,7 +263,7 @@ func Run(args []string) {
 		}
 	} else {
 		for _, filterId := range strings.Split(*filter, ",") {
-			filterId = strings.TrimSpace(strings.ToLower(filterId))
+			filterId = strings.TrimSpace(filterId)
 			systemId := reverseId(filterId)
 
 			if system, ok := games.Systems[systemId]; ok {
@@ -287,7 +283,7 @@ func Run(args []string) {
 	if *detect {
 		results := games.GetActiveSystemPaths(cfg, systems)
 		for _, r := range results {
-			fmt.Printf("%s:%s\n", strings.ToLower(samId(r.System.Id)), r.Path)
+			fmt.Printf("%s:%s\n", samId(r.System.Id), r.Path)
 		}
 		os.Exit(0)
 	}
