@@ -159,12 +159,12 @@ func Run(_ []string) {
 	if len(attractCfg.Systems) > 0 {
 		allowed := map[string]bool{}
 		for _, sys := range attractCfg.Systems {
-			allowed[strings.ToLower(strings.TrimSpace(sys))] = true
+			allowed[strings.TrimSpace(sys)] = true
 		}
 		var filtered []string
 		for _, f := range allFiles {
 			base := strings.TrimSuffix(filepath.Base(f), "_gamelist.txt")
-			if allowed[strings.ToLower(base)] {
+			if allowed[base] {
 				filtered = append(filtered, f)
 			}
 		}
@@ -189,12 +189,12 @@ func Run(_ []string) {
 			if len(attractCfg.Systems) > 0 {
 				allowed := map[string]bool{}
 				for _, sys := range attractCfg.Systems {
-					allowed[strings.ToLower(strings.TrimSpace(sys))] = true
+					allowed[strings.TrimSpace(sys)] = true
 				}
 				var filtered []string
 				for _, f := range files {
 					base := strings.TrimSuffix(filepath.Base(f), "_gamelist.txt")
-					if allowed[strings.ToLower(base)] {
+					if allowed[base] {
 						filtered = append(filtered, f)
 					}
 				}
@@ -245,7 +245,7 @@ func Run(_ []string) {
 		name = strings.TrimSuffix(name, filepath.Ext(name))
 		fmt.Printf("%s - %s <%s>\n", time.Now().Format("15:04:05"), name, gamePath)
 
-		// Launch game (blocking until MiSTer accepts command, but returns immediately after)
+		// Launch game
 		run.Run([]string{gamePath})
 
 		// Update list
