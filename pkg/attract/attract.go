@@ -156,22 +156,21 @@ func Run(_ []string) {
 	// Restrict to allowed systems up front
 	files := allFiles
 	if len(attractCfg.Systems) > 0 {
-		allowed := map[string]bool{}
-		for _, sys := range attractCfg.Systems {
-			allowed[strings.TrimSpace(sys)] = true
-		}
-		var filtered []string
-		for _, f := range allFiles {
-			base := strings.TrimSuffix(filepath.Base(f), "_gamelist.txt")
-			if allowed[base] {
-				filtered = append(filtered, f)
-			}
-		}
-		if len(filtered) == 0 {
-			fmt.Println("No gamelists match Systems in INI")
-			os.Exit(1)
-		}
-		files = filtered
+    	var filtered []string
+    	for _, f := range allFiles {
+        	base := strings.TrimSuffix(filepath.Base(f), "_gamelist.txt")
+        	for _, sys := range attractCfg.Systems {
+            	if strings.EqualFold(strings.TrimSpace(sys), base) {
+                	filtered = append(filtered, f)
+                	break
+            	}
+        	}
+    	}
+    	if len(filtered) == 0 {
+        	fmt.Println("No gamelists match Systems in INI")
+        	os.Exit(1)
+    	}
+    	files = filtered
 	}
 
 	// Seed random
