@@ -199,7 +199,7 @@ func createGamelists(gamelistDir string, systemPaths map[string][]string, progre
 			systemFiles = filterUniqueWithMGL(systemFiles)
 		}
 
-		// 🔑 Sort files instantly, so gamelists are always ordered
+		// Sort files instantly, so gamelists are always ordered
 		if len(systemFiles) > 0 {
 			sort.Strings(systemFiles)
 			totalGames += len(systemFiles)
@@ -242,11 +242,12 @@ func createGamelists(gamelistDir string, systemPaths map[string][]string, progre
 	return totalGames
 }
 
-// 🔑 Entry point for this tool when called from SAM
+// Entry point for this tool when called from SAM
 func Run(args []string) {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 	gamelistDir := fs.String("o", ".", "gamelist files directory")
 	filter := fs.String("s", "all", "list of systems to index (comma separated)")
+	exclude := fs.String("exclude", "", "list of systems to exclude (comma separated)")
 	progress := fs.Bool("p", false, "print output for dialog gauge")
 	quiet := fs.Bool("q", false, "suppress all status output")
 	detect := fs.Bool("d", false, "list active system folders")
@@ -255,8 +256,22 @@ func Run(args []string) {
 	_ = fs.Parse(args)
 
 	var systems []games.System
+
+	// Handle exclude systems
+	var excluded []string
+	if *exclude != "" {
+		excluded = strings.Split(*exclude, ",")
+		for i := range excluded {
+			excluded[i] = strings.TrimSpace(excluded[i])
+		}
+	}
+
 	if *filter == "all" {
-		systems = games.AllSystems()
+		if len(excluded) > 0 {
+			systems = games.AllSystemsExcept(excluded)
+		} else {
+			systems = games.AllSystems()
+		}
 	} else {
 		for _, filterId := range strings.Split(*filter, ",") {
 			systemId := reverseId(filterId)
