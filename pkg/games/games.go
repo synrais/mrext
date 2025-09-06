@@ -92,6 +92,39 @@ func AllSystems() []System {
 	return systems
 }
 
+func AllSystemsExcept(excluded []string) []System {
+	var systems []System
+	excludeMap := make(map[string]bool)
+
+	for _, e := range excluded {
+		excludeMap[strings.ToLower(strings.TrimSpace(e))] = true
+	}
+
+	keys := utils.AlphaMapKeys(Systems)
+	for _, k := range keys {
+		sys := Systems[k]
+
+		if excludeMap[strings.ToLower(sys.Id)] {
+			continue
+		}
+
+		skip := false
+		for _, alias := range sys.Alias {
+			if excludeMap[strings.ToLower(alias)] {
+				skip = true
+				break
+			}
+		}
+		if skip {
+			continue
+		}
+
+		systems = append(systems, sys)
+	}
+
+	return systems
+}
+
 type resultsStack [][]string
 
 func (r *resultsStack) new() {
@@ -206,9 +239,7 @@ func GetFiles(systemId string, path string) ([]string, error) {
 			}
 		} else {
 			// regular files
-			lowerPath := strings.ToLower(path)
-			// always accept .mgl files universally
-			if strings.HasSuffix(lowerPath, ".mgl") || MatchSystemFile(*system, path) {
+			if MatchSystemFile(*system, path) {
 				*results = append(*results, path)
 			}
 		}
