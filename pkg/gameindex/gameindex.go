@@ -1,4 +1,4 @@
-package gameindex
+package list
 
 import (
 	"flag"
