@@ -114,7 +114,9 @@ func LoadUserConfig(name string, defaultConfig *UserConfig) (*UserConfig, error)
 		return defaultConfig, err
 	}
 
-	cfg.NameMapper = ini.NameMapper(strings.ToLower)
+	cfg.NameMapper = func(raw string) string {
+		return strings.ToLower(raw)
+	}
 
 	if err := cfg.MapTo(defaultConfig); err != nil {
 		return defaultConfig, err
