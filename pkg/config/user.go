@@ -113,8 +113,17 @@ func LoadUserConfig(name string, defaultConfig *UserConfig) (*UserConfig, error)
 	if err != nil {
 		return defaultConfig, err
 	}
-	
+
 	for _, section := range cfg.Sections() {
+		origName := section.Name()
+		lowerName := strings.ToLower(origName)
+		if lowerName != origName {
+			dest := cfg.Section(lowerName)
+			for _, key := range section.Keys() {
+				dest.NewKey(strings.ToLower(key.Name()), key.Value())
+			}
+		}
+
 		for _, key := range section.Keys() {
 			lowerKey := strings.ToLower(key.Name())
 			if lowerKey != key.Name() {
