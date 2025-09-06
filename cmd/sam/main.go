@@ -7,6 +7,7 @@ import (
 	"github.com/wizzomafizzo/mrext/pkg/list"
 	"github.com/wizzomafizzo/mrext/pkg/run"
 	"github.com/wizzomafizzo/mrext/pkg/attract"
+	"github.com/wizzomafizzo/mrext/pkg/config"
 )
 
 func main() {
