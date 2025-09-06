@@ -22,7 +22,10 @@ func main() {
 	case "-list":
 		list.Run(args)
 	case "-run":
-		run.Run(args)
+    	if err := run.Run(args); err != nil {
+        	fmt.Fprintln(os.Stderr, "Run failed:", err)
+        	os.Exit(1)
+    	}
 	case "-attract":
 		attract.Run(args)
 	default:
