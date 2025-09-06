@@ -105,6 +105,11 @@ func LoadUserConfig(name string, defaultConfig *UserConfig) (*UserConfig, error)
 	defaultConfig.IniPath = iniPath
 	defaultConfig.Disable = make(map[string]DisableRules)
 
+	if defaultConfig.Attract.PlayTime == "" {
+		defaultConfig.Attract.PlayTime = "40"
+	}
+	defaultConfig.Attract.Random = true
+
 	if _, err := os.Stat(iniPath); os.IsNotExist(err) {
 		return defaultConfig, nil
 	}
