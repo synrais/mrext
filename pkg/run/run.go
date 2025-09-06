@@ -18,16 +18,18 @@ func pathExists(path string) bool {
 }
 
 func bindMount(src, dst string) error {
-	os.MkdirAll(dst, 0755)
+	_ = os.MkdirAll(dst, 0755)
 	cmd := exec.Command("mount", "-o", "bind", src, dst)
 	return cmd.Run()
 }
 
 func unmount(path string) {
-	exec.Command("umount", path).Run()
+	// ignore errors – unmount may fail if nothing is mounted
+	_ = exec.Command("umount", path).Run()
 }
 
 func findAmigaShared() string {
+	// look in configured system paths
 	amigaPaths := games.GetSystemPaths(&config.UserConfig{}, []games.System{games.Systems["Amiga"]})
 	for _, p := range amigaPaths {
 		candidate := filepath.Join(p.Path, "shared")
@@ -35,6 +37,7 @@ func findAmigaShared() string {
 			return candidate
 		}
 	}
+
 	// fallback: try usb0-3
 	for i := 0; i < 4; i++ {
 		usbCandidate := fmt.Sprintf("/media/usb%d/games/Amiga/shared", i)
@@ -42,6 +45,7 @@ func findAmigaShared() string {
 			return usbCandidate
 		}
 	}
+
 	// fallback: fat
 	if pathExists("/media/fat/games/Amiga/shared") {
 		return "/media/fat/games/Amiga/shared"
@@ -50,6 +54,7 @@ func findAmigaShared() string {
 }
 
 // Run launches a game or AmigaVision target.
+// It no longer exits the process – caller handles errors.
 func Run(args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("Usage: SAM -run <path-or-name>")
@@ -64,21 +69,24 @@ func Run(args []string) error {
 		}
 
 		tmpShared := "/tmp/.SAM_tmp/Amiga_shared"
-		os.RemoveAll(tmpShared)
-		os.MkdirAll(tmpShared, 0755)
+		_ = os.RemoveAll(tmpShared)
+		_ = os.MkdirAll(tmpShared, 0755)
 
-		exec.Command("cp", "-a", amigaShared+"/.", tmpShared).Run()
+		// copy real shared into tmp
+		_ = exec.Command("cp", "-a", amigaShared+"/.", tmpShared).Run()
 
+		// write ags_boot file
 		bootFile := filepath.Join(tmpShared, "ags_boot")
 		content := runPath + "\n\n"
-		os.WriteFile(bootFile, []byte(content), 0644)
+		_ = os.WriteFile(bootFile, []byte(content), 0644)
 
+		// bind mount over real shared
 		unmount(amigaShared)
-
 		if err := bindMount(tmpShared, amigaShared); err != nil {
-			return fmt.Errorf("Bind mount failed: %v", err)
+			return fmt.Errorf("bind mount failed: %v", err)
 		}
 
+		// launch minimig core
 		return mister.LaunchCore(&config.UserConfig{}, games.Systems["Amiga"])
 	}
 
