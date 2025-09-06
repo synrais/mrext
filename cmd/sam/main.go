@@ -4,11 +4,39 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/wizzomafizzo/mrext/pkg/list"
-	"github.com/wizzomafizzo/mrext/pkg/run"
 	"github.com/wizzomafizzo/mrext/pkg/attract"
 	"github.com/wizzomafizzo/mrext/pkg/config"
+	"github.com/wizzomafizzo/mrext/pkg/list"
+	"github.com/wizzomafizzo/mrext/pkg/run"
 )
+
+func dumpConfig(cfg *config.UserConfig) {
+	fmt.Printf("INI Debug ->\n")
+	fmt.Printf("  Attract: Systems=%v | PlayTime=%s | Random=%v\n",
+		cfg.Attract.Systems, cfg.Attract.PlayTime, cfg.Attract.Random)
+	fmt.Printf("  List: Exclude=%v\n", cfg.List.Exclude)
+	fmt.Printf("  Search: Filter=%v | Sort=%s\n", cfg.Search.Filter, cfg.Search.Sort)
+	fmt.Printf("  LastPlayed: Name=%s | DisableLastPlayed=%v | RecentFolder=%s | DisableRecentFolder=%v\n",
+		cfg.LastPlayed.Name, cfg.LastPlayed.DisableLastPlayed,
+		cfg.LastPlayed.RecentFolderName, cfg.LastPlayed.DisableRecentFolder)
+	fmt.Printf("  Remote: Mdns=%v | SyncSSHKeys=%v | CustomLogo=%s | AnnounceGameUrl=%s\n",
+		cfg.Remote.MdnsService, cfg.Remote.SyncSSHKeys,
+		cfg.Remote.CustomLogo, cfg.Remote.AnnounceGameUrl)
+	fmt.Printf("  NFC: ConnStr=%s | AllowCommands=%v | DisableSounds=%v | Probe=%v\n",
+		cfg.Nfc.ConnectionString, cfg.Nfc.AllowCommands,
+		cfg.Nfc.DisableSounds, cfg.Nfc.ProbeDevice)
+	fmt.Printf("  Systems: GamesFolder=%v | SetCore=%v\n",
+		cfg.Systems.GamesFolder, cfg.Systems.SetCore)
+
+	// Dump disable rules if any
+	if len(cfg.Disable) > 0 {
+		fmt.Printf("  Disable Rules:\n")
+		for sys, rules := range cfg.Disable {
+			fmt.Printf("    %s -> Folders=%v | Files=%v | Extensions=%v\n",
+				sys, rules.Folders, rules.Files, rules.Extensions)
+		}
+	}
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -19,11 +47,10 @@ func main() {
 	cmd := os.Args[1]
 	cfg, err := config.LoadUserConfig("SAM", &config.UserConfig{})
 	if err != nil {
-    	fmt.Println("Config load error:", err)
+		fmt.Println("Config load error:", err)
 	} else {
-    	fmt.Println("Loaded config from:", cfg.IniPath)
-    	fmt.Printf("INI Debug -> Attract Systems: %v | PlayTime: %s | Random: %v\n",
-        	cfg.Attract.Systems, cfg.Attract.PlayTime, cfg.Attract.Random)
+		fmt.Println("Loaded config from:", cfg.IniPath)
+		dumpConfig(cfg)
 	}
 
 	args := os.Args[2:]
@@ -32,10 +59,10 @@ func main() {
 	case "-list":
 		list.Run(args)
 	case "-run":
-    	if err := run.Run(args); err != nil {
-        	fmt.Fprintln(os.Stderr, "Run failed:", err)
-        	os.Exit(1)
-    	}
+		if err := run.Run(args); err != nil {
+			fmt.Fprintln(os.Stderr, "Run failed:", err)
+			os.Exit(1)
+		}
 	case "-attract":
 		attract.Run(args)
 	default:
