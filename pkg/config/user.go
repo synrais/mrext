@@ -51,6 +51,12 @@ type SystemsConfig struct {
 	SetCore     []string `ini:"set_core,omitempty,allowshadow"`
 }
 
+type AttractConfig struct {
+	PlayTime string   `ini:"playtime,omitempty"`
+	Random   bool     `ini:"random,omitempty"`
+	Systems  []string `ini:"systems,omitempty" delim:","`
+}
+
 type UserConfig struct {
 	AppPath    string
 	IniPath    string
@@ -62,6 +68,7 @@ type UserConfig struct {
 	Remote     RemoteConfig     `ini:"remote,omitempty"`
 	Nfc        NfcConfig        `ini:"nfc,omitempty"`
 	Systems    SystemsConfig    `ini:"systems,omitempty"`
+	Attract AttractConfig       `ini:"attract,omitempty"`
 }
 
 func LoadUserConfig(name string, defaultConfig *UserConfig) (*UserConfig, error) {
