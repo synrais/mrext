@@ -12,6 +12,11 @@ import (
 	"github.com/wizzomafizzo/mrext/pkg/mister"
 )
 
+// normalizeSystemId ensures consistent matching of system IDs.
+func normalizeSystemId(id string) string {
+	return strings.ToLower(strings.TrimSpace(id))
+}
+
 func pathExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
@@ -90,8 +95,8 @@ func Run(args []string) error {
 		return mister.LaunchCore(&config.UserConfig{}, games.Systems["Amiga"])
 	}
 
-	// Case 2: MGL file
-	if strings.HasSuffix(strings.ToLower(runPath), ".mgl") {
+	// Case 2: MGL file (case-insensitive extension check)
+	if strings.EqualFold(filepath.Ext(runPath), ".mgl") {
 		return mister.LaunchGenericFile(&config.UserConfig{}, runPath)
 	}
 
