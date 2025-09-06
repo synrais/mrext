@@ -8,6 +8,7 @@ import (
 	"github.com/wizzomafizzo/mrext/pkg/utils"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -198,7 +199,9 @@ func createGamelists(gamelistDir string, systemPaths map[string][]string, progre
 			systemFiles = filterUniqueWithMGL(systemFiles)
 		}
 
+		// 🔑 Sort files instantly, so gamelists are always ordered
 		if len(systemFiles) > 0 {
+			sort.Strings(systemFiles)
 			totalGames += len(systemFiles)
 			writeGamelist(gamelistDir, systemId, systemFiles)
 		}
