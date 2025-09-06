@@ -78,7 +78,6 @@ func matchesPattern(s, pattern string) bool {
 	p := strings.ToLower(pattern)
 	s = strings.ToLower(s)
 
-	// simple wildcard (* only)
 	if strings.HasPrefix(p, "*") && strings.HasSuffix(p, "*") {
 		return strings.Contains(s, strings.Trim(p, "*"))
 	}
@@ -102,19 +101,16 @@ func disabled(system string, gamePath string, cfg *config.UserConfig) bool {
 	ext := strings.ToLower(filepath.Ext(gamePath))
 	dir := strings.ToLower(filepath.Base(filepath.Dir(gamePath)))
 
-	// Check folders
 	for _, f := range rules.Folders {
 		if matchesPattern(dir, f) {
 			return true
 		}
 	}
-	// Check files
 	for _, f := range rules.Files {
 		if matchesPattern(base, f) {
 			return true
 		}
 	}
-	// Check extensions
 	for _, e := range rules.Extensions {
 		if strings.EqualFold(ext, e) {
 			return true
@@ -125,14 +121,12 @@ func disabled(system string, gamePath string, cfg *config.UserConfig) bool {
 
 // Run is the entry point for the attract tool.
 func Run(_ []string) {
-	// Load config
 	cfg, _ := config.LoadUserConfig("SAM", &config.UserConfig{})
 	attractCfg := cfg.Attract
 
 	listDir := "/tmp/.SAM_List"
 	historyFile := "/tmp/.SAM_History.txt"
 
-	// Collect all gamelist files from listDir
 	allFiles, err := filepath.Glob(filepath.Join(listDir, "*_gamelist.txt"))
 	if err != nil || len(allFiles) == 0 {
 		fmt.Println("No gamelists found in", listDir)
@@ -161,55 +155,42 @@ func Run(_ []string) {
 		files = filtered
 	}
 
-	// Seed random
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-
 	fmt.Printf("Attract mode running. Ctrl-C to exit.\n")
 
 	for {
-		// Pick a random list file
 		listFile := files[r.Intn(len(files))]
 
-		// Load the list
 		lines, err := readLines(listFile)
 		if err != nil || len(lines) == 0 {
 			continue
 		}
 
-		// Pick a game index
 		index := 0
 		if attractCfg.Random {
 			index = r.Intn(len(lines))
 		}
 
 		gamePath := lines[index]
-
-		// Get system ID from filename (e.g., nes_gamelist.txt -> NES)
 		systemID := strings.TrimSuffix(filepath.Base(listFile), "_gamelist.txt")
 
-		// Skip disabled games
 		if disabled(systemID, gamePath, cfg) {
 			lines = append(lines[:index], lines[index+1:]...)
 			_ = writeLines(listFile, lines)
 			continue
 		}
 
-		// Display
+		// ✅ Log system ID in uppercase
 		name := filepath.Base(gamePath)
 		name = strings.TrimSuffix(name, filepath.Ext(name))
-		fmt.Printf("%s - %s <%s>\n", time.Now().Format("15:04:05"), name, gamePath)
+		fmt.Printf("[%s] %s <%s>\n", strings.ToUpper(systemID), name, gamePath)
 
-		// Hand off to run package (blocking here is fine)
 		run.Run([]string{gamePath})
 
-		// Update list: remove played game
 		lines = append(lines[:index], lines[index+1:]...)
 		_ = writeLines(listFile, lines)
+		_ = appendLine(historyFile, fmt.Sprintf("[%s] %s", strings.ToUpper(systemID), gamePath))
 
-		// Append to history
-		_ = appendLine(historyFile, gamePath)
-
-		// Wait
 		wait := parsePlayTime(attractCfg.PlayTime, r)
 		time.Sleep(wait)
 	}
