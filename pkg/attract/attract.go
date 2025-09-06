@@ -133,10 +133,32 @@ func Run(_ []string) {
 	historyFile := "/tmp/.SAM_History.txt"
 
 	// Collect all gamelist files from listDir
-	files, err := filepath.Glob(filepath.Join(listDir, "*_gamelist.txt"))
-	if err != nil || len(files) == 0 {
+	allFiles, err := filepath.Glob(filepath.Join(listDir, "*_gamelist.txt"))
+	if err != nil || len(allFiles) == 0 {
 		fmt.Println("No gamelists found in", listDir)
 		os.Exit(1)
+	}
+
+	// Filter gamelists by Systems if set in INI
+	files := allFiles
+	if len(attractCfg.Systems) > 0 {
+		allowed := map[string]bool{}
+		for _, sys := range attractCfg.Systems {
+			allowed[strings.ToLower(strings.TrimSpace(sys))] = true
+		}
+
+		var filtered []string
+		for _, f := range allFiles {
+			base := strings.TrimSuffix(filepath.Base(f), "_gamelist.txt")
+			if allowed[strings.ToLower(base)] {
+				filtered = append(filtered, f)
+			}
+		}
+		if len(filtered) == 0 {
+			fmt.Println("No gamelists match the configured Systems in INI")
+			os.Exit(1)
+		}
+		files = filtered
 	}
 
 	// Seed random
@@ -147,21 +169,6 @@ func Run(_ []string) {
 	for {
 		// Pick a random list file
 		listFile := files[r.Intn(len(files))]
-
-		// Restrict by systems if configured
-		if len(attractCfg.Systems) > 0 {
-			base := strings.TrimSuffix(filepath.Base(listFile), "_gamelist.txt")
-			skip := true
-			for _, sys := range attractCfg.Systems {
-				if strings.EqualFold(sys, base) {
-					skip = false
-					break
-				}
-			}
-			if skip {
-				continue
-			}
-		}
 
 		// Load the list
 		lines, err := readLines(listFile)
@@ -182,7 +189,6 @@ func Run(_ []string) {
 
 		// Skip disabled games
 		if disabled(systemID, gamePath, cfg) {
-			// Remove from list so we don’t retry endlessly
 			lines = append(lines[:index], lines[index+1:]...)
 			_ = writeLines(listFile, lines)
 			continue
@@ -193,8 +199,8 @@ func Run(_ []string) {
 		name = strings.TrimSuffix(name, filepath.Ext(name))
 		fmt.Printf("%s - %s <%s>\n", time.Now().Format("15:04:05"), name, gamePath)
 
-		// Hand off to run package (non-blocking)
-		go run.Run([]string{gamePath})
+		// Hand off to run package (blocking here is fine)
+		run.Run([]string{gamePath})
 
 		// Update list: remove played game
 		lines = append(lines[:index], lines[index+1:]...)
