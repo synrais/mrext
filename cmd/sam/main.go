@@ -18,8 +18,8 @@ func main() {
 	args := os.Args[2:]
 
 	switch cmd {
-	case "-gameindex":
-		gameindex.Run(args)
+	case "-list":
+		list.Run(args)
 	case "-run":
 		run.Run(args)
 	default:
