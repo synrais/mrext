@@ -3,96 +3,113 @@ package run
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/wizzomafizzo/mrext/pkg/config"
 	"github.com/wizzomafizzo/mrext/pkg/games"
 	"github.com/wizzomafizzo/mrext/pkg/mister"
-	"github.com/wizzomafizzo/mrext/pkg/utils"
 )
 
-// Run launches a game or AmigaVision target.
-// It no longer calls os.Exit – instead it returns errors for the caller to handle.
-func Run(args []string) error {
-	if len(args) < 1 {
-		return fmt.Errorf("Usage: SAM -run <path-or-name>")
-	}
-
-	runPath := args[0]
-
-	// Case 1: AmigaVision (name without slashes)
-	if !strings.ContainsAny(runPath, "/\\") {
-		amigaShared := findAmigaShared()
-		if amigaShared == "" {
-			return fmt.Errorf("games/Amiga/shared folder not found")
-		}
-
-		tmpShared := filepath.Join(os.TempDir(), "amiga-shared")
-		_ = os.RemoveAll(tmpShared)
-		_ = os.MkdirAll(tmpShared, 0755)
-
-		// Copy demo/game into tmp shared
-		paths := []string{
-			filepath.Join(amigaShared, "Games.txt"),
-			filepath.Join(amigaShared, "Demos.txt"),
-		}
-		found := false
-		for _, p := range paths {
-			lines, _ := utils.ReadLines(p)
-			for _, l := range lines {
-				if strings.EqualFold(l, runPath) {
-					found = true
-					_ = os.WriteFile(filepath.Join(tmpShared, "Games.txt"), []byte(runPath+"\n"), 0644)
-					break
-				}
-			}
-			if found {
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("AmigaVision game %q not found", runPath)
-		}
-
-		// Bind mount to Amiga shared folder
-		if err := bindMount(tmpShared, amigaShared); err != nil {
-			return fmt.Errorf("Bind mount failed: %v", err)
-		}
-
-		// Launch Amiga core
-		return mister.LaunchCore(&config.UserConfig{}, games.Systems["Amiga"])
-	}
-
-	// Case 2: MGL file
-	if strings.HasSuffix(strings.ToLower(runPath), ".mgl") {
-		return mister.LaunchGenericFile(&config.UserConfig{}, runPath)
-	}
-
-	// Case 3: Generic file path (ROM, etc.)
-	system, _ := games.BestSystemMatch(&config.UserConfig{}, runPath)
-	return mister.LaunchGame(&config.UserConfig{}, system, runPath)
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
-// findAmigaShared locates the Amiga shared folder on SD or USB.
+func bindMount(src, dst string) error {
+	os.MkdirAll(dst, 0755)
+	cmd := exec.Command("mount", "-o", "bind", src, dst)
+	return cmd.Run()
+}
+
+func unmount(path string) {
+	exec.Command("umount", path).Run()
+}
+
 func findAmigaShared() string {
-	paths := []string{
-		filepath.Join(config.SdFolder, "games/Amiga/shared"),
-		filepath.Join(config.UsbFolder, "games/Amiga/shared"),
-	}
-	for _, p := range paths {
-		if st, err := os.Stat(p); err == nil && st.IsDir() {
-			return p
+	amigaPaths := games.GetSystemPaths(&config.UserConfig{}, []games.System{games.Systems["Amiga"]})
+	for _, p := range amigaPaths {
+		candidate := filepath.Join(p.Path, "shared")
+		if pathExists(candidate) {
+			return candidate
 		}
+	}
+	// fallback: try usb0-3
+	for i := 0; i < 4; i++ {
+		usbCandidate := fmt.Sprintf("/media/usb%d/games/Amiga/shared", i)
+		if pathExists(usbCandidate) {
+			return usbCandidate
+		}
+	}
+	// fallback: fat
+	if pathExists("/media/fat/games/Amiga/shared") {
+		return "/media/fat/games/Amiga/shared"
 	}
 	return ""
 }
 
-// bindMount mounts src to dst (used for AmigaVision).
-func bindMount(src, dst string) error {
-	// BusyBox mount --bind
-	if err := utils.Exec("mount", "--bind", src, dst); err != nil {
-		return fmt.Errorf("mount bind failed: %v", err)
+// 🔑 Entry point for the run tool when called from SAM
+func Run(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "Usage: SAM -run <path-or-name>")
+		os.Exit(1)
 	}
-	return nil
+	runPath := args[0]
+
+	// Case 1: AmigaVision name (anything without slash/backslash)
+	if !strings.ContainsAny(runPath, "/\\") {
+		amigaShared := findAmigaShared()
+		if amigaShared == "" {
+			fmt.Fprintln(os.Stderr, "games/Amiga/shared folder not found")
+			os.Exit(1)
+		}
+
+		// Create tmp copy of shared
+		tmpShared := "/tmp/.SAM_tmp/Amiga_shared"
+		os.RemoveAll(tmpShared)
+		os.MkdirAll(tmpShared, 0755)
+
+		// Copy real shared into tmp
+		exec.Command("cp", "-a", amigaShared+"/.", tmpShared).Run()
+
+		// Write ags_boot
+		bootFile := filepath.Join(tmpShared, "ags_boot")
+		content := runPath + "\n\n"
+		os.WriteFile(bootFile, []byte(content), 0644)
+
+		// Always unmount first
+		unmount(amigaShared)
+
+		// Bind tmp shared over real shared
+		if err := bindMount(tmpShared, amigaShared); err != nil {
+			fmt.Fprintf(os.Stderr, "Bind mount failed: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Launch minimig
+		err := mister.LaunchCore(&config.UserConfig{}, games.Systems["Amiga"])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Launch failed: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
+	// Case 2: MGL file
+	if strings.HasSuffix(strings.ToLower(runPath), ".mgl") {
+		if err := mister.LaunchGenericFile(&config.UserConfig{}, runPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Launch failed: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
+	// Case 3: generic file path
+	system, _ := games.BestSystemMatch(&config.UserConfig{}, runPath)
+	if err := mister.LaunchGame(&config.UserConfig{}, system, runPath); err != nil {
+		fmt.Fprintf(os.Stderr, "Launch failed: %v\n", err)
+		os.Exit(1)
+	}
+	os.Exit(0)
 }
