@@ -10,7 +10,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: SAM -gameindex [flags] | -run [flags]")
+		fmt.Println("Usage: SAM -list [flags] | -run [flags]")
 		os.Exit(1)
 	}
 
