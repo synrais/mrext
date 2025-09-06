@@ -267,6 +267,7 @@ func Run(args []string) {
 		}
 	} else {
 		for _, filterId := range strings.Split(*filter, ",") {
+			filterId = strings.TrimSpace(strings.ToLower(filterId))
 			systemId := reverseId(filterId)
 
 			if system, ok := games.Systems[systemId]; ok {
