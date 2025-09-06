@@ -6,11 +6,12 @@ import (
 
 	"github.com/wizzomafizzo/mrext/pkg/list"
 	"github.com/wizzomafizzo/mrext/pkg/run"
+	"github.com/wizzomafizzo/mrext/pkg/attract"
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: SAM -list [flags] | -run [flags]")
+		fmt.Println("Usage: SAM -list [flags] | -run [flags] | -attract [flags]")
 		os.Exit(1)
 	}
 
@@ -22,6 +23,8 @@ func main() {
 		list.Run(args)
 	case "-run":
 		run.Run(args)
+	case "-attract":
+		attract.Run(args)
 	default:
 		fmt.Printf("Unknown tool: %s\n", cmd)
 		os.Exit(1)
