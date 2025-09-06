@@ -58,6 +58,10 @@ type AttractConfig struct {
 	Systems  []string `ini:"systems,omitempty" delim:","`
 }
 
+type ListConfig struct {
+	Exclude []string `ini:"exclude,omitempty" delim:","`
+}
+
 type DisableRules struct {
 	Folders    []string `ini:"folders,omitempty" delim:","`
 	Files      []string `ini:"files,omitempty" delim:","`
@@ -76,6 +80,7 @@ type UserConfig struct {
 	Nfc        NfcConfig               `ini:"nfc,omitempty"`
 	Systems    SystemsConfig           `ini:"systems,omitempty"`
 	Attract    AttractConfig           `ini:"attract,omitempty"`
+	List       ListConfig              `ini:"list,omitempty"`
 	Disable    map[string]DisableRules `ini:"-"`
 }
 
