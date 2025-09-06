@@ -51,7 +51,7 @@ func gamelistFilename(systemId string) string {
 	return strings.ToLower(prefix) + "_gamelist.txt"
 }
 
-func writeGamelist(gamelistDir string, systemId string, files []string) {
+func writeGamelist(gamelistDir string, systemId string, files []string) string {
 	gamelistPath := filepath.Join(gamelistDir, gamelistFilename(systemId))
 	tmpPath, err := os.CreateTemp("", "gamelist-*.txt")
 	if err != nil {
@@ -68,6 +68,7 @@ func writeGamelist(gamelistDir string, systemId string, files []string) {
 	if err != nil {
 		panic(err)
 	}
+	return gamelistPath
 }
 
 func filterUniqueWithMGL(files []string) []string {
@@ -144,84 +145,15 @@ func writeAmigaVisionLists(gamelistDir string, paths []string) {
 	}
 }
 
-func createGamelists(gamelistDir string, systemPaths map[string][]string, progress bool, quiet bool, filter bool) int {
-	start := time.Now()
-
-	if !quiet && !progress {
-		fmt.Println("Finding system folders...")
-	}
-
-	totalPaths := 0
-	for _, v := range systemPaths {
-		totalPaths += len(v)
-	}
-	totalSteps := totalPaths
-	currentStep := 0
-
-	totalGames := 0
-	for systemId, paths := range systemPaths {
-		var systemFiles []string
-
-		for _, path := range paths {
-			if !quiet {
-				if progress {
-					fmt.Println("XXX")
-					fmt.Println(int(float64(currentStep) / float64(totalSteps) * 100))
-					fmt.Printf("Scanning %s (%s)\n", systemId, path)
-					fmt.Println("XXX")
-				} else {
-					fmt.Printf("Scanning %s: %s\n", systemId, path)
-				}
-			}
-
-			files, err := games.GetFiles(systemId, path)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				continue
-			}
-			systemFiles = append(systemFiles, files...)
-
-			currentStep++
-		}
-
-		if filter {
-			systemFiles = filterUniqueWithMGL(systemFiles)
-		}
-
-		if len(systemFiles) > 0 {
-			totalGames += len(systemFiles)
-			writeGamelist(gamelistDir, systemId, systemFiles)
-		}
-
-		if strings.EqualFold(systemId, "Amiga") {
-			writeAmigaVisionLists(gamelistDir, paths)
-		}
-	}
-
-	if !quiet {
-		taken := int(time.Since(start).Seconds())
-		if progress {
-			fmt.Println("XXX")
-			fmt.Println("100")
-			fmt.Printf("Indexing complete (%d games in %ds)\n", totalGames, taken)
-			fmt.Println("XXX")
-		} else {
-			fmt.Printf("Indexing complete (%d games in %ds)\n", totalGames, taken)
-		}
-	}
-
-	return totalGames
-}
-
-// 🔑 Entry point for this tool when called from SAM
 func Run(args []string) {
-	fs := flag.NewFlagSet("gameindex", flag.ExitOnError)
+	fs := flag.NewFlagSet("list", flag.ExitOnError)
 	gamelistDir := fs.String("o", ".", "gamelist files directory")
 	filter := fs.String("s", "all", "list of systems to index (comma separated)")
 	progress := fs.Bool("p", false, "print output for dialog gauge")
 	quiet := fs.Bool("q", false, "suppress all status output")
 	detect := fs.Bool("d", false, "list active system folders")
 	noDupes := fs.Bool("nodupes", false, "filter out duplicate games")
+	overwrite := fs.Bool("overwrite", false, "overwrite existing gamelists (default false)")
 	_ = fs.Parse(args)
 
 	var systems []games.System
@@ -253,18 +185,64 @@ func Run(args []string) {
 		os.Exit(0)
 	}
 
-	systemPaths := games.GetSystemPaths(&config.UserConfig{}, systems)
-	systemPathsMap := make(map[string][]string)
+	start := time.Now()
+	totalGames := 0
+	var generatedLists []string
 
-	for _, p := range systemPaths {
-		systemPathsMap[p.System.Id] = append(systemPathsMap[p.System.Id], p.Path)
+	for _, system := range systems {
+		glPath := filepath.Join(*gamelistDir, gamelistFilename(system.Id))
+
+		// ✅ Skip scanning if gamelist exists and overwrite=false
+		if _, err := os.Stat(glPath); err == nil && !*overwrite {
+			if !*quiet {
+				fmt.Printf("Skipping %s (list already exists: %s)\n", system.Id, glPath)
+			}
+			generatedLists = append(generatedLists, glPath)
+			continue
+		}
+
+		// Scan and build gamelist
+		systemPaths := games.GetSystemPaths(&config.UserConfig{}, []games.System{system})
+		var systemFiles []string
+		for _, p := range systemPaths {
+			files, err := games.GetFiles(system.Id, p.Path)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				continue
+			}
+			systemFiles = append(systemFiles, files...)
+		}
+
+		if *noDupes {
+			systemFiles = filterUniqueWithMGL(systemFiles)
+		}
+
+		if len(systemFiles) > 0 {
+			totalGames += len(systemFiles)
+			path := writeGamelist(*gamelistDir, system.Id, systemFiles)
+			generatedLists = append(generatedLists, path)
+		}
+
+		if strings.EqualFold(system.Id, "Amiga") {
+			writeAmigaVisionLists(*gamelistDir, systemPaths[0:1]) // reuse Amiga paths
+		}
 	}
 
-	total := createGamelists(*gamelistDir, systemPathsMap, *progress, *quiet, *noDupes)
+	// ✅ Copy all lists into /tmp/.SAM_List (clean first)
+	tmpDir := "/tmp/.SAM_List"
+	_ = os.RemoveAll(tmpDir)
+	_ = os.MkdirAll(tmpDir, 0755)
+	for _, listFile := range generatedLists {
+		dest := filepath.Join(tmpDir, filepath.Base(listFile))
+		_ = utils.CopyFile(listFile, dest)
+	}
 
-	if total == 0 {
+	if !*quiet {
+		taken := int(time.Since(start).Seconds())
+		fmt.Printf("Indexing complete (%d games in %ds)\n", totalGames, taken)
+	}
+
+	if totalGames == 0 {
 		os.Exit(8)
-	} else {
-		os.Exit(0)
 	}
 }
