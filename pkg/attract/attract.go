@@ -137,6 +137,24 @@ func rebuildLists(listDir string) []string {
 	return refreshed
 }
 
+// filterAllowed applies system restriction case-insensitively.
+func filterAllowed(allFiles []string, systems []string) []string {
+	if len(systems) == 0 {
+		return allFiles
+	}
+	var filtered []string
+	for _, f := range allFiles {
+		base := strings.TrimSuffix(filepath.Base(f), "_gamelist.txt")
+		for _, sys := range systems {
+			if strings.EqualFold(strings.TrimSpace(sys), base) {
+				filtered = append(filtered, f)
+				break
+			}
+		}
+	}
+	return filtered
+}
+
 // Run is the entry point for the attract tool.
 func Run(_ []string) {
 	// Load config
@@ -154,23 +172,10 @@ func Run(_ []string) {
 	}
 
 	// Restrict to allowed systems up front
-	files := allFiles
-	if len(attractCfg.Systems) > 0 {
-    	var filtered []string
-    	for _, f := range allFiles {
-        	base := strings.TrimSuffix(filepath.Base(f), "_gamelist.txt")
-        	for _, sys := range attractCfg.Systems {
-            	if strings.EqualFold(strings.TrimSpace(sys), base) {
-                	filtered = append(filtered, f)
-                	break
-            	}
-        	}
-    	}
-    	if len(filtered) == 0 {
-        	fmt.Println("No gamelists match Systems in INI")
-        	os.Exit(1)
-    	}
-    	files = filtered
+	files := filterAllowed(allFiles, attractCfg.Systems)
+	if len(files) == 0 {
+		fmt.Println("No gamelists match Systems in INI")
+		os.Exit(1)
 	}
 
 	// Seed random
@@ -181,24 +186,7 @@ func Run(_ []string) {
 	for {
 		// Stop if no files left
 		if len(files) == 0 {
-			files = rebuildLists(listDir)
-
-			// Reapply system restriction
-			if len(attractCfg.Systems) > 0 {
-				allowed := map[string]bool{}
-				for _, sys := range attractCfg.Systems {
-					allowed[strings.TrimSpace(sys)] = true
-				}
-				var filtered []string
-				for _, f := range files {
-					base := strings.TrimSuffix(filepath.Base(f), "_gamelist.txt")
-					if allowed[base] {
-						filtered = append(filtered, f)
-					}
-				}
-				files = filtered
-			}
-
+			files = filterAllowed(rebuildLists(listDir), attractCfg.Systems)
 			if len(files) == 0 {
 				fmt.Println("❌ Failed to rebuild gamelists, exiting.")
 				return
