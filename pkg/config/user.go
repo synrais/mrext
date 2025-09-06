@@ -101,15 +101,19 @@ func LoadUserConfig(name string, defaultConfig *UserConfig) (*UserConfig, error)
 		iniPath = filepath.Join(filepath.Dir(exePath), name+".ini")
 	}
 
+	// Bake in defaults BEFORE mapping from INI
 	defaultConfig.AppPath = exePath
 	defaultConfig.IniPath = iniPath
 	defaultConfig.Disable = make(map[string]DisableRules)
 
+	// ---- Default Attract settings ----
 	if defaultConfig.Attract.PlayTime == "" {
-		defaultConfig.Attract.PlayTime = "40"
+		defaultConfig.Attract.PlayTime = "40" // default 40 seconds
 	}
+	// NOTE: Random is a bool (false by default). We force true here.
 	defaultConfig.Attract.Random = true
 
+	// Return early if INI file doesn’t exist
 	if _, err := os.Stat(iniPath); os.IsNotExist(err) {
 		return defaultConfig, nil
 	}
@@ -119,6 +123,7 @@ func LoadUserConfig(name string, defaultConfig *UserConfig) (*UserConfig, error)
 		return defaultConfig, err
 	}
 
+	// Case-insensitive normalize
 	for _, section := range cfg.Sections() {
 		origName := section.Name()
 		lowerName := strings.ToLower(origName)
@@ -137,10 +142,12 @@ func LoadUserConfig(name string, defaultConfig *UserConfig) (*UserConfig, error)
 		}
 	}
 
+	// Map INI → struct (overrides defaults if provided)
 	if err := cfg.MapTo(defaultConfig); err != nil {
 		return defaultConfig, err
 	}
 
+	// Parse disable.* rules
 	for _, section := range cfg.Sections() {
 		secName := strings.ToLower(section.Name())
 		if strings.HasPrefix(secName, "disable.") {
