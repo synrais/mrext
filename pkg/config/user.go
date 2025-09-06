@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/ini.v1"
 )
@@ -57,18 +58,25 @@ type AttractConfig struct {
 	Systems  []string `ini:"systems,omitempty" delim:","`
 }
 
+type DisableRules struct {
+	Folders    []string `ini:"folders,omitempty" delim:","`
+	Files      []string `ini:"files,omitempty" delim:","`
+	Extensions []string `ini:"extensions,omitempty" delim:","`
+}
+
 type UserConfig struct {
 	AppPath    string
 	IniPath    string
-	LaunchSync LaunchSyncConfig `ini:"launchsync,omitempty"`
-	PlayLog    PlayLogConfig    `ini:"playlog,omitempty"`
-	Random     RandomConfig     `ini:"random,omitempty"`
-	Search     SearchConfig     `ini:"search,omitempty"`
-	LastPlayed LastPlayedConfig `ini:"lastplayed,omitempty"`
-	Remote     RemoteConfig     `ini:"remote,omitempty"`
-	Nfc        NfcConfig        `ini:"nfc,omitempty"`
-	Systems    SystemsConfig    `ini:"systems,omitempty"`
-	Attract AttractConfig       `ini:"attract,omitempty"`
+	LaunchSync LaunchSyncConfig        `ini:"launchsync,omitempty"`
+	PlayLog    PlayLogConfig           `ini:"playlog,omitempty"`
+	Random     RandomConfig            `ini:"random,omitempty"`
+	Search     SearchConfig            `ini:"search,omitempty"`
+	LastPlayed LastPlayedConfig        `ini:"lastplayed,omitempty"`
+	Remote     RemoteConfig            `ini:"remote,omitempty"`
+	Nfc        NfcConfig               `ini:"nfc,omitempty"`
+	Systems    SystemsConfig           `ini:"systems,omitempty"`
+	Attract    AttractConfig           `ini:"attract,omitempty"`
+	Disable    map[string]DisableRules `ini:"-"`
 }
 
 func LoadUserConfig(name string, defaultConfig *UserConfig) (*UserConfig, error) {
@@ -90,6 +98,7 @@ func LoadUserConfig(name string, defaultConfig *UserConfig) (*UserConfig, error)
 
 	defaultConfig.AppPath = exePath
 	defaultConfig.IniPath = iniPath
+	defaultConfig.Disable = make(map[string]DisableRules)
 
 	if _, err := os.Stat(iniPath); os.IsNotExist(err) {
 		return defaultConfig, nil
@@ -103,6 +112,16 @@ func LoadUserConfig(name string, defaultConfig *UserConfig) (*UserConfig, error)
 	err = cfg.StrictMapTo(defaultConfig)
 	if err != nil {
 		return defaultConfig, err
+	}
+
+	for _, section := range cfg.Sections() {
+		if strings.HasPrefix(strings.ToLower(section.Name()), "disable.") {
+			sys := strings.TrimPrefix(section.Name(), "Disable.")
+			sys = strings.TrimPrefix(sys, "disable.") // handle lowercase too
+			var rules DisableRules
+			_ = section.MapTo(&rules)
+			defaultConfig.Disable[sys] = rules
+		}
 	}
 
 	return defaultConfig, nil
