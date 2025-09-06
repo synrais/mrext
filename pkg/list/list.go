@@ -241,13 +241,18 @@ func createGamelists(gamelistDir string, systemPaths map[string][]string, progre
 // Entry point for this tool when called from SAM
 func Run(args []string) {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
-	gamelistDir := fs.String("o", ".", "gamelist files directory")
+
+	// Default gamelist dir now points to SAM_Gamelists
+	defaultOut := "/media/fat/Scripts/.MiSTer_SAM/SAM_Gamelists"
+	gamelistDir := fs.String("o", defaultOut, "gamelist files directory")
+
 	filter := fs.String("s", "all", "list of systems to index (comma separated)")
 	progress := fs.Bool("p", false, "print output for dialog gauge")
 	quiet := fs.Bool("q", false, "suppress all status output")
 	detect := fs.Bool("d", false, "list active system folders")
 	noDupes := fs.Bool("nodupes", false, "filter out duplicate games")
 	overwrite := fs.Bool("overwrite", false, "overwrite existing gamelists if present")
+
 	_ = fs.Parse(args)
 
 	// Load user config (for List.Exclude)
@@ -263,7 +268,7 @@ func Run(args []string) {
 		}
 	} else {
 		for _, filterId := range strings.Split(*filter, ",") {
-			filterId = strings.TrimSpace(filterId)
+			filterId = strings.TrimSpace(strings.ToLower(filterId))
 			systemId := reverseId(filterId)
 
 			if system, ok := games.Systems[systemId]; ok {
@@ -283,7 +288,7 @@ func Run(args []string) {
 	if *detect {
 		results := games.GetActiveSystemPaths(cfg, systems)
 		for _, r := range results {
-			fmt.Printf("%s:%s\n", samId(r.System.Id), r.Path)
+			fmt.Printf("%s:%s\n", strings.ToLower(samId(r.System.Id)), r.Path)
 		}
 		os.Exit(0)
 	}
