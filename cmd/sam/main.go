@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/wizzomafizzo/mrext/pkg/gameindex"
+	"github.com/wizzomafizzo/mrext/pkg/list"
 	"github.com/wizzomafizzo/mrext/pkg/run"
 )
 
