@@ -247,7 +247,6 @@ func Run(args []string) {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 	gamelistDir := fs.String("o", ".", "gamelist files directory")
 	filter := fs.String("s", "all", "list of systems to index (comma separated)")
-	exclude := fs.String("exclude", "", "list of systems to exclude (comma separated)")
 	progress := fs.Bool("p", false, "print output for dialog gauge")
 	quiet := fs.Bool("q", false, "suppress all status output")
 	detect := fs.Bool("d", false, "list active system folders")
@@ -255,20 +254,14 @@ func Run(args []string) {
 	overwrite := fs.Bool("overwrite", false, "overwrite existing gamelists if present")
 	_ = fs.Parse(args)
 
+	// Load user config (for List.Exclude)
+	cfg, _ := config.LoadUserConfig("SAM", &config.UserConfig{})
+
 	var systems []games.System
-
-	// Handle exclude systems
-	var excluded []string
-	if *exclude != "" {
-		excluded = strings.Split(*exclude, ",")
-		for i := range excluded {
-			excluded[i] = strings.TrimSpace(excluded[i])
-		}
-	}
-
 	if *filter == "all" {
-		if len(excluded) > 0 {
-			systems = games.AllSystemsExcept(excluded)
+		// Respect [List] Exclude in ini
+		if len(cfg.List.Exclude) > 0 {
+			systems = games.AllSystemsExcept(cfg.List.Exclude)
 		} else {
 			systems = games.AllSystems()
 		}
@@ -291,14 +284,14 @@ func Run(args []string) {
 	}
 
 	if *detect {
-		results := games.GetActiveSystemPaths(&config.UserConfig{}, systems)
+		results := games.GetActiveSystemPaths(cfg, systems)
 		for _, r := range results {
 			fmt.Printf("%s:%s\n", strings.ToLower(samId(r.System.Id)), r.Path)
 		}
 		os.Exit(0)
 	}
 
-	systemPaths := games.GetSystemPaths(&config.UserConfig{}, systems)
+	systemPaths := games.GetSystemPaths(cfg, systems)
 	systemPathsMap := make(map[string][]string)
 
 	for _, p := range systemPaths {
