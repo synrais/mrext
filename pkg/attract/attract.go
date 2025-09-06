@@ -1,4 +1,3 @@
-// pkg/attract/attract.go
 package attract
 
 import (
@@ -99,9 +98,9 @@ func disabled(system string, gamePath string, cfg *config.UserConfig) bool {
 		return false
 	}
 
-	base := strings.ToLower(filepath.Base(gamePath))
-	ext := strings.ToLower(filepath.Ext(gamePath))
-	dir := strings.ToLower(filepath.Base(filepath.Dir(gamePath)))
+	base := filepath.Base(gamePath)
+	ext := filepath.Ext(gamePath)
+	dir := filepath.Base(filepath.Dir(gamePath))
 
 	for _, f := range rules.Folders {
 		if matchesPattern(dir, f) {
