@@ -245,8 +245,8 @@ func Run(_ []string) {
 		name = strings.TrimSuffix(name, filepath.Ext(name))
 		fmt.Printf("%s - %s <%s>\n", time.Now().Format("15:04:05"), name, gamePath)
 
-		// Launch game
-		go run.Run([]string{gamePath})
+		// Launch game (blocking until MiSTer accepts command, but returns immediately after)
+		run.Run([]string{gamePath})
 
 		// Update list
 		lines = append(lines[:index], lines[index+1:]...)
