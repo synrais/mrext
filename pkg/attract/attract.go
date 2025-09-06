@@ -193,8 +193,8 @@ func Run(_ []string) {
 		name = strings.TrimSuffix(name, filepath.Ext(name))
 		fmt.Printf("%s - %s <%s>\n", time.Now().Format("15:04:05"), name, gamePath)
 
-		// Hand off to run package
-		run.Run([]string{gamePath})
+		// Hand off to run package (non-blocking)
+		go run.Run([]string{gamePath})
 
 		// Update list: remove played game
 		lines = append(lines[:index], lines[index+1:]...)
