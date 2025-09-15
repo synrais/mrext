@@ -114,7 +114,7 @@ func (r *resultsStack) get() (*[]string, error) {
 
 // GetFiles searches for all valid games in a given path and return a list of
 // files. This function deep searches .zip files and handles symlinks at all
-// levels.
+// levels, and applies edge cases for special systems.
 func GetFiles(systemId string, path string) ([]string, error) {
 	var allResults []string
 	var stack resultsStack
@@ -206,8 +206,17 @@ func GetFiles(systemId string, path string) ([]string, error) {
 			}
 		} else {
 			// regular files
-			if MatchSystemFile(*system, path) {
-				*results = append(*results, path)
+
+			// Edge case hook (e.g. AmigaVision games.txt / demos.txt)
+			if resultsEdge, err, ok := RunEdgeCase(system.Id, path); ok {
+				if err == nil && len(resultsEdge) > 0 {
+					*results = append(*results, resultsEdge...)
+				}
+			} else {
+				// fallback: normal extension matching
+				if MatchSystemFile(*system, path) {
+					*results = append(*results, path)
+				}
 			}
 		}
 
