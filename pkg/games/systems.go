@@ -582,8 +582,8 @@ var Systems = map[string]System{
 		},
 	},
 	"Genesis": {
-		Id:           "Genesis",
-		Name:         "Genesis",
+		Id:           "MegaDrive",
+		Name:         "MegaDrive",
 		Category:     CategoryConsole,
 		Manufacturer: ManufacturerSega,
 		ReleaseDate:  "1988-10-29",
@@ -1275,7 +1275,7 @@ var Systems = map[string]System{
 		Category:     CategoryConsole,
 		Manufacturer: ManufacturerCommodore,
 		ReleaseDate:  "1985-07-23",
-		Folder:       []string{"AmigaCD32"},
+		Folder:       []string{"Amiga", "AmigaCD32"},
 		Alias:        []string{"AmigaCD32"},
 		Rbf:          "_Computer/Minimig",
 		Slots: []Slot{
@@ -1290,6 +1290,28 @@ var Systems = map[string]System{
 			},
 		},
 	},
+"AmigaVision": {
+    Id:           "AmigaVision",
+    Name:         "AmigaVision",
+    Category:     CategoryComputer,
+    Manufacturer: ManufacturerCommodore,
+    ReleaseDate:  "1991-01-01",
+    Folder:       []string{"Amiga"},
+    Alias:        []string{"AmigaVision"},
+    Rbf:          "_Computer/Minimig",
+    Slots: []Slot{
+        {
+            Label: "AmigaVisionEntry",
+            Exts:  []string{".txt"},
+            Mgl: &MglParams{
+                Delay:  1,
+                Method: "f",
+                Index:  0,
+            },
+        },
+    },
+},
+
 	"Amstrad": {
 		Id:           "Amstrad",
 		Name:         "Amstrad CPC",
