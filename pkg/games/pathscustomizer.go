@@ -41,8 +41,8 @@ func customizeAmigaVision(txtPath string) ([]string, error) {
 		if line == "" {
 			continue
 		}
-		// Pseudo-path: txt file plus entry
-		results = append(results, txtPath+"#"+line)
+		// Pseudo-path: txt file path + / + entry + .amiv
+		results = append(results, txtPath+"/"+line+".amiv")
 	}
 	return results, nil
 }
