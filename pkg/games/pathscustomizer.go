@@ -29,6 +29,12 @@ func init() {
 
 // customizeAmigaVision expands demos.txt / games.txt into pseudo-paths.
 func customizeAmigaVision(txtPath string) ([]string, error) {
+	base := filepath.Base(txtPath)
+	if base != "games.txt" && base != "demos.txt" {
+		// Ignore any other .txt files in the folder
+		return nil, nil
+	}
+
 	data, err := os.ReadFile(txtPath)
 	if err != nil {
 		return nil, err
