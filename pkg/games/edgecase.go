@@ -2,6 +2,7 @@ package games
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -30,8 +31,14 @@ func init() {
 	RegisterEdgeCase("AmigaVision", edgecaseAmigaVision)
 }
 
-// edgecaseAmigaVision expands demos.txt / games.txt into pseudo-paths.
+// edgecaseAmigaVision only expands games.txt / demos.txt into pseudo-paths.
 func edgecaseAmigaVision(txtPath string) ([]string, error) {
+	base := strings.ToLower(filepath.Base(txtPath))
+	if base != "games.txt" && base != "demos.txt" {
+		// Not a file we care about, skip it
+		return nil, nil
+	}
+
 	data, err := os.ReadFile(txtPath)
 	if err != nil {
 		return nil, err
