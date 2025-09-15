@@ -1,10 +1,10 @@
 FROM ubuntu:kinetic
 
-# Redirect apt sources to old-releases since kinetic is EOL
+# Point apt sources to old-releases since kinetic is EOL
 RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g' /etc/apt/sources.list && \
     sed -i 's|http://security.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g' /etc/apt/sources.list
 
-# Update and upgrade base system
+# Now update and upgrade
 RUN apt-get update -y && apt-get upgrade -y
 
 # Install all required dependencies + Go
@@ -18,7 +18,7 @@ WORKDIR /opt
 RUN wget -c https://releases.linaro.org/components/toolchain/binaries/6.5-2018.12/arm-linux-gnueabihf/gcc-linaro-6.5.0-2018.12-x86_64_arm-linux-gnueabihf.tar.xz && \
     tar -xJf gcc-linaro-6.5.0-2018.12-x86_64_arm-linux-gnueabihf.tar.xz
 
-# Create a non-root user for builds
+# Create non-root user for builds
 RUN useradd -m -u 1000 build
 USER build
 
