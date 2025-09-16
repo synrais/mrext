@@ -1,7 +1,7 @@
 # glibc in this version matches mister
 FROM arm32v7/debian:bullseye
 
-# enable bullseye-backports repo
+# enable bullseye-backports repo manually
 RUN echo "deb http://deb.debian.org/debian bullseye-backports main" >> /etc/apt/sources.list && \
     apt-get update -y && apt-get upgrade -y
 
