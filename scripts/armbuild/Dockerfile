@@ -1,18 +1,26 @@
 # glibc in this version matches mister
-FROM arm32v7/debian:bullseye-backports
+FROM arm32v7/debian:bullseye
 
-RUN apt-get update -y && apt-get upgrade -y
+# enable bullseye-backports repo
+RUN echo "deb http://deb.debian.org/debian bullseye-backports main" >> /etc/apt/sources.list && \
+    apt-get update -y && apt-get upgrade -y
 
 # make go mod download work
 RUN apt-get install -y ca-certificates openssl && \
-    openssl s_client -showcerts -connect github.com:443 </dev/null 2>/dev/null|openssl x509 -outform PEM > /usr/local/share/ca-certificates/github.crt && \
-    openssl s_client -showcerts -connect proxy.golang.org:443 </dev/null 2>/dev/null|openssl x509 -outform PEM >  /usr/local/share/ca-certificates/proxy.golang.crt && \
+    openssl s_client -showcerts -connect github.com:443 </dev/null 2>/dev/null | \
+      openssl x509 -outform PEM > /usr/local/share/ca-certificates/github.crt && \
+    openssl s_client -showcerts -connect proxy.golang.org:443 </dev/null 2>/dev/null | \
+      openssl x509 -outform PEM > /usr/local/share/ca-certificates/proxy.golang.crt && \
     update-ca-certificates
 
 # install go and app dependencies
-RUN apt-get install build-essential git curl wget -y && \
-    apt-get install golang-doc/bullseye-backports golang-go/bullseye-backports golang-src/bullseye-backports golang/bullseye-backports -y && \
-    apt-get install libsqlite3-dev libncurses-dev linux-source -y
+RUN apt-get install -y build-essential git curl wget && \
+    apt-get install -y \
+        golang-doc/bullseye-backports \
+        golang-go/bullseye-backports \
+        golang-src/bullseye-backports \
+        golang/bullseye-backports && \
+    apt-get install -y libsqlite3-dev libncurses-dev linux-source
 
 # install mplayer dependencies
 RUN apt-get install -y libasound2-dev libasound2 liblapack-dev liblapack3
@@ -27,6 +35,7 @@ RUN cd /home/build && \
     git clone https://github.com/magefile/mage --depth 1 && \
     mkdir /home/build/go && \
     cd mage && go run bootstrap.go
+
 ENV PATH="${PATH}:/home/build/go/bin"
 
 WORKDIR /build
