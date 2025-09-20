@@ -1,231 +1,46 @@
 package main
 
 import (
-	"flag"
 	"fmt"
-	"github.com/wizzomafizzo/mrext/pkg/config"
-	"log"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
+	"runtime/debug"
 
-	"github.com/wizzomafizzo/mrext/pkg/games"
-	"github.com/wizzomafizzo/mrext/pkg/utils"
+	"github.com/synrais/SAM-GO/pkg/assets"
+	"github.com/synrais/SAM-GO/pkg/attract"
+	"github.com/synrais/SAM-GO/pkg/config"
 )
 
-// SAM uses slightly different system IDs.
-var idMap = map[string]string{
-	"Gameboy":        "gb",
-	"GameboyColor":   "gbc",
-	"GameGear":       "gg",
-	"Nintendo64":     "n64",
-	"MasterSystem":   "sms",
-	"Sega32X":        "s32x",
-	"SuperGameboy":   "sgb",
-	"TurboGrafx16":   "tgfx16",
-	"TurboGrafx16CD": "tgfx16cd",
-}
+const iniFileName = "SAM.ini"
 
-// Only allow these extensions to be indexed.
-// Any systems not listed will allow all extensions.
-var extMap = map[string][]string{
-	"Atari5200":    {".a52", ".car"},
-	"Atari7800":    {".a78"},
-	"C64":          {".crt", ".prg"},
-	"Genesis":      {".gen", ".md"},
-	"NeoGeo":       {".neo"},
-	"SNES":         {".sfc", ".smc"},
-	"TurboGrafx16": {".pce", ".sgx"},
-}
-
-// Convert an internal system ID to a SAM ID if possible.
-func samId(id string) string {
-	if id, ok := idMap[id]; ok {
-		return id
-	}
-
-	return id
-}
-
-// Convert a SAM system ID to an internal ID if possible.
-func reverseId(id string) string {
-	for k, v := range idMap {
-		if strings.EqualFold(v, id) {
-			return k
-		}
-	}
-
-	return id
-}
-
-// Return the filename of the gamelist for a given system ID.
-func gamelistFilename(systemId string) string {
-	var prefix string
-	if id, ok := idMap[systemId]; ok {
-		prefix = id
-	} else {
-		prefix = systemId
-	}
-
-	return strings.ToLower(prefix) + "_gamelist.txt"
-}
-
-// Generate a gamelist file for a system with given results.
-func writeGamelist(gamelistDir string, systemId string, files []string) {
-	gamelistPath := filepath.Join(gamelistDir, gamelistFilename(systemId))
-	tmpPath, err := os.CreateTemp("", "gamelist-*.txt")
-	if err != nil {
-		panic(err)
-	}
-
-	for _, file := range files {
-		_, _ = tmpPath.WriteString(file + "\n")
-	}
-	_ = tmpPath.Sync()
-	_ = tmpPath.Close()
-
-	err = utils.MoveFile(tmpPath.Name(), gamelistPath)
-	if err != nil {
-		panic(err)
-	}
-}
-
-// Generate gamelists for all systems. Main workflow of app.
-func createGamelists(gamelistDir string, systemPaths map[string][]string, progress bool, quiet bool, filter bool) int {
-	start := time.Now()
-
-	if !quiet && !progress {
-		fmt.Println("Finding system folders...")
-	}
-
-	// prep calculating progress
-	totalPaths := 0
-	for _, v := range systemPaths {
-		totalPaths += len(v)
-	}
-	totalSteps := totalPaths
-	currentStep := 0
-
-	// generate file list
-	totalGames := 0
-	for systemId, paths := range systemPaths {
-		var systemFiles []string
-
-		for _, path := range paths {
-			if !quiet {
-				if progress {
-					fmt.Println("XXX")
-					fmt.Println(int(float64(currentStep) / float64(totalSteps) * 100))
-					fmt.Printf("Scanning %s (%s)\n", systemId, path)
-					fmt.Println("XXX")
-				} else {
-					fmt.Printf("Scanning %s: %s\n", systemId, path)
-				}
-			}
-
-			files, err := games.GetFiles(systemId, path)
-			if err != nil {
-				log.Println(err)
-				continue
-			}
-			systemFiles = append(systemFiles, files...)
-
-			currentStep++
-		}
-
-		if filter {
-			systemFiles = games.FilterUniqueFilenames(systemFiles)
-		}
-
-		// filter out certain extensions
-		var filteredFiles []string
-		if filterExts, ok := extMap[systemId]; ok {
-			for _, file := range systemFiles {
-				path := strings.ToLower(file)
-				for _, ext := range filterExts {
-					if strings.HasSuffix(path, ext) {
-						filteredFiles = append(filteredFiles, file)
-						break
-					}
-				}
-			}
-			systemFiles = filteredFiles
-		}
-
-		if len(systemFiles) > 0 {
-			totalGames += len(systemFiles)
-			writeGamelist(gamelistDir, systemId, systemFiles)
-		}
-	}
-
-	if !quiet {
-		taken := int(time.Since(start).Seconds())
-		if progress {
-			fmt.Println("XXX")
-			fmt.Println("100")
-			fmt.Printf("Indexing complete (%d games in %ds)\n", totalGames, taken)
-			fmt.Println("XXX")
-		} else {
-			fmt.Printf("Indexing complete (%d games in %ds)\n", totalGames, taken)
-		}
-	}
-
-	return totalGames
-}
-
+// main is the entrypoint for SAM.
+// It ensures config exists, loads it, and then hands off to Attract Mode.
 func main() {
-	gamelistDir := flag.String("o", ".", "gamelist files directory")
-	filter := flag.String("s", "all", "list of systems to index (comma separated)")
-	progress := flag.Bool("p", false, "print output for dialog gauge")
-	quiet := flag.Bool("q", false, "suppress all status output")
-	detect := flag.Bool("d", false, "list active system folders")
-	noDupes := flag.Bool("nodupes", false, "filter out duplicate games")
-	flag.Parse()
+	debug.SetMemoryLimit(128 * 1024 * 1024) // 128MB soft limit
 
-	// filter systems
-	var systems []games.System
-	if *filter == "all" {
-		systems = games.AllSystems()
-	} else {
-		for _, filterId := range strings.Split(*filter, ",") {
-			systemId := reverseId(filterId)
+	exePath, _ := os.Executable()
+	iniPath := filepath.Join(filepath.Dir(exePath), iniFileName)
 
-			if system, ok := games.Systems[systemId]; ok {
-				systems = append(systems, system)
-				continue
-			}
-
-			system, err := games.LookupSystem(systemId)
-			if err != nil {
-				continue
-			}
-
-			systems = append(systems, *system)
+	// Ensure SAM.ini exists
+	if _, err := os.Stat(iniPath); os.IsNotExist(err) {
+		fmt.Println("[MAIN] No INI found, generating from embedded default...")
+		if err := os.WriteFile(iniPath, []byte(assets.DefaultSAMIni), 0644); err != nil {
+			fmt.Fprintln(os.Stderr, "[MAIN] Failed to create default INI:", err)
+			os.Exit(1)
 		}
-	}
-
-	// find active system paths
-	if *detect {
-		results := games.GetActiveSystemPaths(&config.UserConfig{}, systems)
-		for _, r := range results {
-			fmt.Printf("%s:%s\n", strings.ToLower(samId(r.System.Id)), r.Path)
-		}
-		os.Exit(0)
-	}
-
-	systemPaths := games.GetSystemPaths(&config.UserConfig{}, systems)
-	systemPathsMap := make(map[string][]string)
-
-	for _, p := range systemPaths {
-		systemPathsMap[p.System.Id] = append(systemPathsMap[p.System.Id], p.Path)
-	}
-
-	total := createGamelists(*gamelistDir, systemPathsMap, *progress, *quiet, *noDupes)
-
-	if total == 0 {
-		os.Exit(8)
+		fmt.Println("[MAIN] Generated default INI at", iniPath)
 	} else {
-		os.Exit(0)
+		fmt.Println("[MAIN] Found INI at", iniPath)
 	}
+
+	// Load config
+	cfg, err := config.LoadUserConfig("SAM", &config.UserConfig{})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[MAIN] Config load error:", err)
+		os.Exit(1)
+	}
+	fmt.Println("[MAIN] Loaded config from:", cfg.IniPath)
+
+	// Hand off directly to attract mode
+	attract.PrepareAttract(cfg)
 }
